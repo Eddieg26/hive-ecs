@@ -1,20 +1,15 @@
-use registry::{Extension, Object};
-use std::collections::HashMap;
+use std::{alloc::Layout, any::TypeId, collections::HashMap, fmt::Debug};
 
-pub mod archetype;
+pub mod bitset;
 pub mod blob;
 pub mod event;
-pub mod registry;
+pub mod frame;
 pub mod resource;
 pub mod storage;
 
-pub trait Component: Send + Sync + 'static {}
-
-pub struct ComponentExt;
-
-impl Extension for ComponentExt {}
-
-impl<C: Component> Object<ComponentExt> for C {}
+pub use event::*;
+pub use frame::*;
+pub use resource::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Entity {
@@ -23,8 +18,12 @@ pub struct Entity {
 }
 
 impl Entity {
-    fn new(id: u32, generation: u32) -> Self {
+    pub fn new(id: u32, generation: u32) -> Self {
         Self { id, generation }
+    }
+
+    pub fn root(id: u32) -> Self {
+        Self { id, generation: 0 }
     }
 
     pub fn id(&self) -> u32 {
@@ -33,6 +32,16 @@ impl Entity {
 
     pub fn generation(&self) -> u32 {
         self.generation
+    }
+}
+
+impl std::fmt::Display for Entity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Entity {{ id: {}, generation: {} }}",
+            self.id, self.generation
+        )
     }
 }
 
@@ -75,5 +84,93 @@ impl Entities {
         self.current = 0;
         self.free.clear();
         self.generations.clear();
+    }
+}
+
+pub trait Component: Send + Sync + 'static {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ComponentId(pub(crate) u32);
+
+pub struct ComponentMeta {
+    id: ComponentId,
+    name: &'static str,
+    layout: Layout,
+}
+
+impl ComponentMeta {
+    pub fn new<C: Component>(id: ComponentId) -> Self {
+        let name = std::any::type_name::<C>();
+
+        Self {
+            id,
+            name: if let Some(index) = name.rfind(":") {
+                &name[index..]
+            } else {
+                name
+            },
+            layout: Layout::new::<C>(),
+        }
+    }
+
+    pub fn id(&self) -> ComponentId {
+        self.id
+    }
+
+    pub fn name(&self) -> &'static str {
+        self.name
+    }
+
+    pub fn layout(&self) -> Layout {
+        self.layout
+    }
+}
+
+pub struct Components {
+    components: Vec<ComponentMeta>,
+    map: HashMap<TypeId, ComponentId>,
+}
+
+impl Components {
+    pub fn new() -> Self {
+        Self {
+            components: vec![],
+            map: HashMap::new(),
+        }
+    }
+
+    pub fn register<C: Component>(&mut self) -> ComponentId {
+        let ty = TypeId::of::<C>();
+        match self.map.get(&ty) {
+            Some(id) => *id,
+            None => {
+                let id = ComponentId(self.components.len() as u32);
+                let meta = ComponentMeta::new::<C>(id);
+
+                self.components.push(meta);
+                self.map.insert(TypeId::of::<C>(), id);
+
+                id
+            }
+        }
+    }
+
+    pub fn get<C: Component>(&self) -> Option<&ComponentMeta> {
+        self.map.get(&TypeId::of::<C>()).and_then(|id| {
+            self.components
+                .get(id.0 as usize)
+                .filter(|meta| meta.id == *id)
+        })
+    }
+
+    pub fn get_id<C: Component>(&self) -> Option<ComponentId> {
+        self.map.get(&TypeId::of::<C>()).copied()
+    }
+
+    pub unsafe fn get_id_unchecked<C: Component>(&self) -> ComponentId {
+        self.map
+            .get(&TypeId::of::<C>())
+            .copied()
+            .unwrap_or_else(|| panic!("Component not registered: {}", std::any::type_name::<C>()))
     }
 }

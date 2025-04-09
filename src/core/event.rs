@@ -1,3 +1,5 @@
+use super::resource::Resource;
+
 pub trait Event: Sized + 'static {}
 
 pub struct Events<E: Event> {
@@ -6,17 +8,19 @@ pub struct Events<E: Event> {
 }
 
 impl<E: Event> Events<E> {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             write: Vec::new(),
             read: Vec::new(),
         }
     }
 
-    pub(crate) fn update(&mut self) {
+    pub fn update(&mut self) {
         self.read = std::mem::take(&mut self.write);
     }
 }
+
+impl<E: Event> Resource for Events<E> {}
 
 pub struct EventReader<'a, E: Event> {
     events: &'a Events<E>,
@@ -57,7 +61,7 @@ pub struct EventWriter<'a, E: Event> {
 }
 
 impl<'a, E: Event> EventWriter<'a, E> {
-    pub(crate) fn new(events: &'a mut Events<E>) -> Self {
+    pub fn new(events: &'a mut Events<E>) -> Self {
         Self { events }
     }
 

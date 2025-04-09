@@ -1,13 +1,22 @@
 use super::{
     blob::BlobCell,
-    registry::{Object, ObjectId},
+    storage::{SparseArray, SparseIndex},
 };
-use indexmap::IndexMap;
-use std::thread::ThreadId;
+use std::{any::TypeId, collections::HashMap, thread::ThreadId};
 
 pub trait Resource: Sized + 'static {}
 
-impl<R: Resource> Object<()> for R {}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ResourceId(u32);
+impl SparseIndex for ResourceId {
+    fn to_usize(self) -> usize {
+        self.0 as usize
+    }
+
+    fn from_usize(index: usize) -> Self {
+        Self(index as u32)
+    }
+}
 
 pub struct ResourceCell {
     name: &'static str,
@@ -46,6 +55,15 @@ impl ResourceCell {
         self.data.value_mut::<R>()
     }
 
+    pub fn into<R: Resource>(mut self) -> R {
+        if !self.has_access(std::thread::current().id()) {
+            panic!("Accessing non send resource from another thread is forbidden.")
+        }
+
+        let data = std::mem::take(&mut self.data);
+        data.into()
+    }
+
     pub fn owner(&self) -> Option<ThreadId> {
         self.owner
     }
@@ -69,84 +87,63 @@ impl Drop for ResourceCell {
     }
 }
 
-pub struct ResourceStorage(IndexMap<ObjectId, ResourceCell>);
-
-impl ResourceStorage {
-    pub fn new() -> Self {
-        Self(IndexMap::new())
-    }
-
-    pub fn add<const SEND: bool, R: Resource>(&mut self, id: ObjectId, resource: R) {
-        let cell = ResourceCell::new::<SEND, R>(resource);
-        self.0.insert(id, cell);
-    }
-
-    pub fn get<R: Resource>(&self, id: ObjectId) -> Option<&R> {
-        self.0.get(&id).and_then(|cell| Some(cell.get::<R>()))
-    }
-
-    pub fn get_mut<R: Resource>(&mut self, id: ObjectId) -> Option<&mut R> {
-        self.0
-            .get_mut(&id)
-            .and_then(|cell| Some(cell.get_mut::<R>()))
-    }
-
-    pub fn remove(&mut self, id: ObjectId) {
-        self.0.shift_remove(&id);
-    }
-}
-
 pub struct Resources {
-    send: ResourceStorage,
-    non_send: ResourceStorage,
+    resources: SparseArray<ResourceId, ResourceCell>,
+    map: HashMap<TypeId, ResourceId>,
 }
 
 impl Resources {
     pub fn new() -> Self {
         Self {
-            send: ResourceStorage::new(),
-            non_send: ResourceStorage::new(),
+            resources: SparseArray::new(),
+            map: HashMap::new(),
         }
     }
 
-    pub fn add<const SEND: bool, R: Resource>(&mut self, id: ObjectId, resource: R) {
-        self.storage_mut::<SEND>().add::<SEND, R>(id, resource);
-    }
-
-    pub fn get<const SEND: bool, R: Resource>(&self, id: ObjectId) -> Option<&R> {
-        self.storage::<SEND>().get(id)
-    }
-
-    pub fn get_mut<const SEND: bool, R: Resource>(&mut self, id: ObjectId) -> Option<&mut R> {
-        self.storage_mut::<SEND>().get_mut(id)
-    }
-
-    pub fn try_get<const SEND: bool, R: Resource>(&self, id: ObjectId) -> Option<&R> {
-        self.storage::<SEND>().get(id)
-    }
-
-    pub fn try_get_mut<const SEND: bool, R: Resource>(&mut self, id: ObjectId) -> Option<&mut R> {
-        self.storage_mut::<SEND>().get_mut(id)
-    }
-
-    pub fn contains<const SEND: bool>(&self, id: ObjectId) -> bool {
-        self.storage::<SEND>().0.contains_key(&id)
-    }
-
-    pub fn remove<const SEND: bool>(&mut self, id: ObjectId) {
-        self.storage_mut::<SEND>().remove(id);
-    }
-
-    fn storage<const SEND: bool>(&self) -> &ResourceStorage {
-        if SEND { &self.send } else { &self.non_send }
-    }
-
-    fn storage_mut<const SEND: bool>(&mut self) -> &mut ResourceStorage {
-        if SEND {
-            &mut self.send
-        } else {
-            &mut self.non_send
+    pub fn register<const SEND: bool, R: Resource>(&mut self) -> ResourceId {
+        let id = TypeId::of::<R>();
+        match self.map.get(&id).copied() {
+            Some(id) => id,
+            None => {
+                let resource_id = ResourceId(self.resources.len() as u32);
+                self.map.insert(id, resource_id);
+                self.resources.reserve(resource_id);
+                resource_id
+            }
         }
+    }
+
+    pub fn add<const SEND: bool, R: Resource>(&mut self, resource: R) -> ResourceId {
+        let id = TypeId::of::<R>();
+        match self.map.get(&id).copied() {
+            Some(id) => id,
+            None => {
+                let resource_id = ResourceId(self.resources.len() as u32);
+                self.map.insert(id, resource_id);
+                self.resources
+                    .insert(resource_id, ResourceCell::new::<SEND, R>(resource));
+                resource_id
+            }
+        }
+    }
+
+    pub fn get<R: Resource>(&self) -> Option<&R> {
+        let id = self.map.get(&TypeId::of::<R>())?;
+        self.resources.get(*id).map(|cell| cell.get())
+    }
+
+    pub fn get_mut<R: Resource>(&mut self) -> Option<&mut R> {
+        let id = self.map.get(&TypeId::of::<R>())?;
+        self.resources.get_mut(*id).map(|cell| cell.get_mut())
+    }
+
+    pub fn contains<R: Resource>(&self) -> bool {
+        self.map.contains_key(&TypeId::of::<R>())
+    }
+
+    pub fn remove<R: Resource>(&mut self) -> Option<R> {
+        let id = self.map.get(&TypeId::of::<R>())?;
+        self.resources.remove(*id).map(|r| r.into())
     }
 }
 

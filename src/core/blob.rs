@@ -1,12 +1,19 @@
-use std::{alloc::Layout, fmt::Debug, marker::PhantomData};
+use std::{alloc::Layout, marker::PhantomData};
 
 pub struct Blob {
+    name: &'static str,
     data: Vec<u8>,
     length: usize,
     capacity: usize,
     layout: Layout,
     aligned_layout: Layout,
     drop: Option<fn(data: *mut u8)>,
+}
+
+impl Default for Blob {
+    fn default() -> Self {
+        Self::empty()
+    }
 }
 
 impl Blob {
@@ -21,12 +28,25 @@ impl Blob {
         };
 
         Self {
+            name: std::any::type_name::<T>(),
             data,
             capacity,
             length: 0,
             layout,
             aligned_layout,
             drop,
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            name: "",
+            data: Vec::new(),
+            length: 0,
+            capacity: 0,
+            layout: Layout::new::<u8>(),
+            aligned_layout: Layout::new::<u8>(),
+            drop: None,
         }
     }
 
@@ -45,9 +65,28 @@ impl Blob {
         };
 
         Self {
+            name: std::any::type_name::<T>(),
             data,
             capacity: 2,
             length: 1,
+            layout,
+            aligned_layout,
+            drop,
+        }
+    }
+
+    pub fn from_cell(mut cell: BlobCell) -> Self {
+        let data = std::mem::take(&mut cell.data);
+        let layout = cell.layout;
+        let drop = cell.drop.take();
+        let aligned_layout = layout.pad_to_align();
+        let name = cell.name;
+
+        Self {
+            name,
+            data,
+            length: 1,
+            capacity: 1,
             layout,
             aligned_layout,
             drop,
@@ -59,6 +98,7 @@ impl Blob {
         let data = Vec::with_capacity(capacity * aligned_layout.size());
 
         Self {
+            name: "",
             data,
             capacity,
             length: 0,
@@ -284,6 +324,7 @@ impl Blob {
         }
 
         Blob {
+            name: self.name,
             aligned_layout: self.aligned_layout,
             layout: self.layout,
             drop: self.drop.clone(),
@@ -300,12 +341,14 @@ impl Blob {
 
         let start = (self.length - 1) * self.aligned_layout.size();
         let end = start + self.aligned_layout.size();
-        let data = self.data.drain(start..end).collect::<Vec<_>>();
+        let mut data = self.data.drain(start..end).collect::<Vec<_>>();
 
-        let start = index * self.aligned_layout.size();
-        let end = start + self.aligned_layout().size();
+        if self.length > 1 {
+            let start = index * self.aligned_layout.size();
+            let end = start + self.aligned_layout().size();
 
-        let data = self.data.splice(start..end, data).collect::<Vec<_>>();
+            data = self.data.splice(start..end, data).collect::<Vec<_>>();
+        }
 
         self.length -= 1;
         unsafe {
@@ -317,6 +360,7 @@ impl Blob {
         }
 
         Blob {
+            name: self.name,
             aligned_layout: self.aligned_layout,
             layout: self.layout,
             drop: self.drop.clone(),
@@ -326,7 +370,7 @@ impl Blob {
         }
     }
 
-    pub fn push_cell(&mut self, cell: BlobCell) {
+    pub fn push_cell(&mut self, mut cell: BlobCell) {
         if cell.layout != self.layout {
             panic!("Layouts are different")
         }
@@ -342,9 +386,12 @@ impl Blob {
             self.length += 1;
             self.data.set_len(self.length * self.aligned_layout.size());
         }
+
+        cell.data = vec![];
+        cell.drop = None;
     }
 
-    pub fn insert_cell(&mut self, index: usize, cell: BlobCell) {
+    pub fn insert_cell(&mut self, index: usize, mut cell: BlobCell) {
         if cell.layout != self.layout {
             panic!("Layouts are different")
         }
@@ -367,6 +414,9 @@ impl Blob {
             self.length += 1;
             self.data.set_len(self.length * self.aligned_layout.size());
         }
+
+        cell.data = vec![];
+        cell.drop = None;
     }
 
     pub fn remove_cell(&mut self, index: usize) -> BlobCell {
@@ -390,6 +440,7 @@ impl Blob {
         }
 
         Some(BlobCell {
+            name: self.name,
             data,
             layout: self.layout,
             drop: self.drop.clone(),
@@ -403,12 +454,14 @@ impl Blob {
 
         let start = (self.length - 1) * self.aligned_layout.size();
         let end = start + self.aligned_layout.size();
-        let data = self.data.drain(start..end).collect::<Vec<_>>();
+        let mut data = self.data.drain(start..end).collect::<Vec<_>>();
 
-        let start = index * self.aligned_layout.size();
-        let end = start + self.aligned_layout().size();
+        if self.length > 1 {
+            let start = index * self.aligned_layout.size();
+            let end = start + self.aligned_layout().size();
 
-        let data = self.data.splice(start..end, data).collect::<Vec<_>>();
+            data = self.data.splice(start..end, data).collect::<Vec<_>>();
+        }
 
         self.length -= 1;
 
@@ -417,6 +470,7 @@ impl Blob {
         }
 
         Some(BlobCell {
+            name: self.name,
             data,
             layout: self.layout,
             drop: self.drop.clone(),
@@ -494,44 +548,6 @@ impl Blob {
     }
 }
 
-impl From<BlobCell> for Blob {
-    fn from(mut cell: BlobCell) -> Self {
-        let data = std::mem::take(&mut cell.data);
-        let layout = cell.layout;
-        let drop = cell.drop.take();
-        let aligned_layout = layout.pad_to_align();
-
-        Self {
-            data,
-            length: 1,
-            capacity: 1,
-            layout,
-            aligned_layout,
-            drop,
-        }
-    }
-}
-
-impl From<Blob> for BlobCell {
-    fn from(mut blob: Blob) -> Self {
-        if blob.length != 1 {
-            panic!("Blob length must be 1.")
-        }
-
-        let mut data = std::mem::take(&mut blob.data);
-        let layout = blob.layout;
-        let drop = blob.drop;
-        blob.length = 0;
-        blob.capacity = 0;
-
-        unsafe {
-            data.set_len(layout.size());
-        }
-
-        Self { data, layout, drop }
-    }
-}
-
 impl Drop for Blob {
     fn drop(&mut self) {
         self.clear()
@@ -539,9 +555,16 @@ impl Drop for Blob {
 }
 
 pub struct BlobCell {
+    name: &'static str,
     data: Vec<u8>,
     layout: Layout,
     drop: Option<fn(data: *mut u8)>,
+}
+
+impl Default for BlobCell {
+    fn default() -> Self {
+        Self::empty()
+    }
 }
 
 impl BlobCell {
@@ -561,7 +584,48 @@ impl BlobCell {
             false => None,
         };
 
-        Self { data, layout, drop }
+        Self {
+            name: std::any::type_name::<T>(),
+            data,
+            layout,
+            drop,
+        }
+    }
+
+    pub fn from_blob(mut blob: Blob) -> Self {
+        if blob.length != 1 {
+            panic!("Blob length must be 1.")
+        }
+
+        let mut data = std::mem::take(&mut blob.data);
+        let layout = blob.layout;
+        let drop = blob.drop;
+        blob.length = 0;
+        blob.capacity = 0;
+
+        unsafe {
+            data.set_len(layout.size());
+        }
+
+        Self {
+            name: blob.name,
+            data,
+            layout,
+            drop,
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            name: "",
+            data: Vec::new(),
+            layout: Layout::new::<u8>(),
+            drop: None,
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        self.name
     }
 
     pub fn layout(&self) -> &Layout {
@@ -644,32 +708,27 @@ pub struct Ptr<'a, T: 'static> {
 }
 
 impl<'a, T: 'static> Ptr<'a, T> {
-    fn new(data: *mut T) -> Self {
+    pub fn new(data: *mut T) -> Self {
         Self {
             data,
             _marker: Default::default(),
         }
     }
-}
 
-impl<'a, T: 'static> std::ops::Deref for Ptr<'a, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        unsafe { &*self.data }
+    pub fn get(&self, index: usize) -> Option<&'a T> {
+        if index < std::mem::size_of::<T>() {
+            Some(unsafe { &*self.data.add(index) })
+        } else {
+            None
+        }
     }
-}
 
-impl<'a, T: 'static> std::ops::DerefMut for Ptr<'a, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut *self.data }
-    }
-}
-
-impl<'a, T: Debug + 'static> Debug for Ptr<'a, T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let value = unsafe { &*self.data };
-        f.debug_struct("Ptr").field("data", value).finish()
+    pub fn get_mut(&mut self, index: usize) -> Option<&'a mut T> {
+        if index < std::mem::size_of::<T>() {
+            Some(unsafe { &mut *self.data.add(index) })
+        } else {
+            None
+        }
     }
 }
 

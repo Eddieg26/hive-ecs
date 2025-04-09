@@ -67,6 +67,12 @@ where
         self.values[index] = Some(value);
     }
 
+    pub fn reserve(&mut self, index: I) {
+        if index.to_usize() > self.values.len() {
+            self.values.resize_with(index.to_usize(), || None);
+        }
+    }
+
     pub fn get(&self, index: I) -> Option<&V> {
         let index = index.to_usize();
         if index < self.values.len() {
@@ -213,13 +219,15 @@ impl<I: SparseIndex, V> SparseSet<I, V> {
         Some(&mut self.values[*index])
     }
 
-    pub fn insert(&mut self, index: I, value: V) {
+    pub fn insert(&mut self, index: I, value: V) -> Option<V> {
         if let Some(index) = self.sparse.get(index) {
-            self.values[*index] = value;
+            let value = std::mem::replace(&mut self.values[*index], value);
+            Some(value)
         } else {
             self.sparse.insert(index, self.values.len());
             self.values.push(value);
             self.indices.push(index);
+            None
         }
     }
 

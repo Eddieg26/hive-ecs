@@ -1,5 +1,5 @@
 [package]
-name = "terra"
+name = "hive-ecs"
 version = "0.1.0"
 edition = "2024"
 
