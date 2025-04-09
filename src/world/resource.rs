@@ -1,4 +1,4 @@
-use super::{
+use crate::core::{
     blob::BlobCell,
     storage::{SparseArray, SparseIndex},
 };

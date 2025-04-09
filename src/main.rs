@@ -1,11 +1,8 @@
-use core::{
-    Component, ComponentId, Entity,
-    blob::Blob,
-    table::{Column, Row, TableBuilder, TableCell},
-};
-use world::query::{Added, Modified, Query, QueryState};
+use system::query::{Added, Query, QueryState};
+use world::Component;
 
 pub mod core;
+pub mod system;
 pub mod world;
 
 fn main() {

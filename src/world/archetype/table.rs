@@ -1,5 +1,5 @@
-use super::{
-    Component, ComponentId, Entity, Frame,
+use super::{Component, ComponentId, Entity, Frame};
+use crate::core::{
     blob::{Blob, BlobCell, Ptr},
     frame::ObjectTracker,
     storage::{ImmutableSparseSet, SparseIndex, SparseSet},

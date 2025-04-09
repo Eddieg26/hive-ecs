@@ -1,15 +1,14 @@
-use super::{
-    World,
-    archetype::{Archetype, ArchetypeQuery},
+use crate::core::{Frame, ObjectTracker, blob::Ptr, storage::SparseIndex};
+use crate::world::{
+    Component, ComponentId, Components, Entity, World,
+    archetype::{
+        Archetype, ArchetypeQuery,
+        table::{Column, RowIndex},
+    },
     cell::WorldCell,
-    system::SystemArg,
 };
-use crate::core::{
-    Component, ComponentId, Components, Entity, Frame, ObjectTracker,
-    blob::Ptr,
-    storage::SparseIndex,
-    table::{Column, RowIndex},
-};
+
+use super::arg::SystemArg;
 
 pub trait BaseQuery {
     type Item<'w>;
@@ -466,7 +465,7 @@ unsafe impl<Q: BaseQuery + 'static, F: BaseFilter + 'static> SystemArg for Query
     unsafe fn get<'world, 'state>(
         state: &'state mut Self::State,
         world: WorldCell<'world>,
-        system: &super::system::SystemMeta,
+        system: &super::SystemMeta,
     ) -> Self::Item<'world, 'state> {
         unsafe { Query::with_frame(world.get(), state, system.frame) }
     }
@@ -642,11 +641,11 @@ impl_base_query_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q))
 mod tests {
 
     use crate::{
-        core::{
-            bitset::Bitset,
+        core::bitset::Bitset,
+        world::archetype::{
+            ArchetypeId,
             table::{Row, TableCell},
         },
-        world::archetype::ArchetypeId,
     };
 
     use super::*;

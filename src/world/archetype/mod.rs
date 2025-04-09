@@ -1,10 +1,10 @@
-use crate::core::{
-    Component, ComponentId, Components, Entity, Frame,
-    bitset::Bitset,
-    storage::SparseIndex,
-    table::{Row, Table, TableBuilder, TableCell},
-};
+use super::{Component, ComponentId, Components, Entity};
+use crate::core::{Frame, bitset::Bitset, storage::SparseIndex};
 use std::{collections::HashMap, fmt::Debug};
+
+pub mod table;
+
+pub use table::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ArchetypeId(pub u32);
