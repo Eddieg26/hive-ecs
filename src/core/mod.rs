@@ -6,6 +6,7 @@ pub mod event;
 pub mod frame;
 pub mod resource;
 pub mod storage;
+pub mod table;
 
 pub use event::*;
 pub use frame::*;

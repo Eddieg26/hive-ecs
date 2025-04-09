@@ -1,10 +1,11 @@
-use archetype::table::{Column, Row, TableBuilder, TableCell};
-use core::{Component, ComponentId, Entity, blob::Blob};
+use core::{
+    Component, ComponentId, Entity,
+    blob::Blob,
+    table::{Column, Row, TableBuilder, TableCell},
+};
 use world::query::{Added, Modified, Query, QueryState};
 
-pub mod archetype;
 pub mod core;
-pub mod system;
 pub mod world;
 
 fn main() {

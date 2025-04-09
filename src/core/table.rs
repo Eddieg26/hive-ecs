@@ -1,4 +1,4 @@
-use crate::core::{
+use super::{
     Component, ComponentId, Entity, Frame,
     blob::{Blob, BlobCell, Ptr},
     frame::ObjectTracker,

@@ -1,14 +1,16 @@
 use crate::{
-    archetype::{ArchetypeId, Archetypes, table::Row},
     core::{
         Component, ComponentId, Components, Entities, Entity, Frame, NonSend, NonSendMut, Res,
-        ResMut, Resource, ResourceId, Resources,
+        ResMut, Resource, ResourceId, Resources, table::Row,
     },
+    world::archetype::{ArchetypeId, Archetypes},
 };
 use std::fmt::Debug;
 
+pub mod archetype;
 pub mod cell;
 pub mod query;
+pub mod system;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorldId(u32);
