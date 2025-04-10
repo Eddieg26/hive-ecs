@@ -17,10 +17,9 @@ impl ComponentMeta {
 
         Self {
             id,
-            name: if let Some(index) = name.rfind(":") {
-                &name[index..]
-            } else {
-                name
+            name: match name.rfind(":") {
+                Some(index) => &name[index..],
+                None => name,
             },
             layout: Layout::new::<C>(),
         }

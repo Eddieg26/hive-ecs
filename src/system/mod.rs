@@ -6,6 +6,7 @@ use std::{any::Any, borrow::Cow, sync::Arc};
 
 pub mod arg;
 pub mod query;
+pub mod schedule;
 
 pub type SystemName = Cow<'static, str>;
 
@@ -55,7 +56,7 @@ pub struct SystemMeta {
     pub send: bool,
     /// The system should be ran exclusively in the given frame.
     pub exclusive: bool,
-    /// The frame in which the system is executed.
+    /// The frame in which the system was last executed.
     pub frame: Frame,
 }
 
