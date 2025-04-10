@@ -1,4 +1,4 @@
-use crate::core::{Frame, ObjectTracker, blob::Ptr, storage::SparseIndex};
+use crate::core::{Frame, ObjectStatus, blob::Ptr, storage::SparseIndex};
 use crate::world::{
     Component, ComponentId, Components, Entity, World,
     archetype::{
@@ -248,12 +248,12 @@ impl<C: Component> BaseQuery for &C {
 
 pub struct WriteQuery<'a, C: Component> {
     components: Ptr<'a, C>,
-    frames: Ptr<'a, ObjectTracker>,
+    frames: Ptr<'a, ObjectStatus>,
     _marker: std::marker::PhantomData<C>,
 }
 
 impl<'a, C: Component> WriteQuery<'a, C> {
-    pub fn new(components: Ptr<'a, C>, frames: Ptr<'a, ObjectTracker>) -> Self {
+    pub fn new(components: Ptr<'a, C>, frames: Ptr<'a, ObjectStatus>) -> Self {
         Self {
             components,
             frames,

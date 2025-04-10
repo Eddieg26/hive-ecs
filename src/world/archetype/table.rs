@@ -1,7 +1,7 @@
 use super::{Component, ComponentId, Entity, Frame};
 use crate::core::{
     blob::{Blob, BlobCell, Ptr},
-    frame::ObjectTracker,
+    frame::ObjectStatus,
     storage::{ImmutableSparseSet, SparseIndex, SparseSet},
 };
 use indexmap::IndexSet;
@@ -9,21 +9,21 @@ use std::alloc::Layout;
 
 pub struct TableCell {
     data: BlobCell,
-    frame: ObjectTracker,
+    frame: ObjectStatus,
 }
 
 impl TableCell {
     pub fn new<T: Component>(value: T) -> Self {
         Self {
             data: BlobCell::new::<T>(value),
-            frame: ObjectTracker::new(),
+            frame: ObjectStatus::new(),
         }
     }
 
     pub fn with_frame<T: Component>(value: T, frame: Frame) -> Self {
         Self {
             data: BlobCell::new::<T>(value),
-            frame: ObjectTracker {
+            frame: ObjectStatus {
                 added: frame,
                 modified: frame,
             },
@@ -50,7 +50,7 @@ impl TableCell {
         self.data.drop()
     }
 
-    pub fn frame(&self) -> &ObjectTracker {
+    pub fn frame(&self) -> &ObjectStatus {
         &self.frame
     }
 
@@ -65,7 +65,7 @@ impl TableCell {
 
 pub struct Column {
     data: Blob,
-    frames: Vec<ObjectTracker>,
+    frames: Vec<ObjectStatus>,
 }
 
 impl Column {
@@ -91,15 +91,19 @@ impl Column {
         self.data.get_mut::<T>(index)
     }
 
-    pub unsafe fn get_ptr<T: Component>(&self) -> (Ptr<'_, T>, Ptr<'_, ObjectTracker>) {
+    pub unsafe fn get_ptr<T: Component>(&self) -> (Ptr<'_, T>, Ptr<'_, ObjectStatus>) {
         let components = unsafe { self.data.ptr::<T>(0) };
-        let frames = self.frames.as_ptr() as *mut ObjectTracker;
+        let frames = self.frames.as_ptr() as *mut ObjectStatus;
 
         (components, Ptr::new(frames))
     }
 
-    pub fn frames(&self) -> &[ObjectTracker] {
+    pub fn frames(&self) -> &[ObjectStatus] {
         &self.frames
+    }
+
+    pub fn frames_mut(&mut self) -> &mut [ObjectStatus] {
+        &mut self.frames
     }
 
     pub fn push<T: Component>(&mut self, value: T) {
@@ -330,6 +334,21 @@ impl Table {
 
     pub fn get_column(&self, component: ComponentId) -> Option<&Column> {
         self.columns.get(component)
+    }
+
+    pub fn modify_component(&mut self, entity: Entity, component: ComponentId, frame: Frame) {
+        let Some(index) = self.entities.get_index_of(&entity) else {
+            return;
+        };
+
+        let Some(column) = self.columns.get_mut(component) else {
+            return;
+        };
+
+        column
+            .frames_mut()
+            .get_mut(index)
+            .and_then(|cell| Some(cell.modified = frame));
     }
 
     pub fn get_component<C: Component>(

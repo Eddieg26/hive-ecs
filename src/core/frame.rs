@@ -78,12 +78,12 @@ impl std::ops::SubAssign<u32> for Frame {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ObjectTracker {
+pub struct ObjectStatus {
     pub added: Frame,
     pub modified: Frame,
 }
 
-impl ObjectTracker {
+impl ObjectStatus {
     pub fn new() -> Self {
         Self {
             added: Frame::ZERO,

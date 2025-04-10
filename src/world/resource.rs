@@ -1,4 +1,5 @@
 use crate::core::{
+    Frame, ObjectStatus,
     blob::BlobCell,
     storage::{SparseArray, SparseIndex},
 };
@@ -23,6 +24,7 @@ pub struct ResourceCell {
     data: BlobCell,
     owner: Option<ThreadId>,
     send: bool,
+    status: ObjectStatus,
 }
 
 impl ResourceCell {
@@ -32,6 +34,7 @@ impl ResourceCell {
             data: BlobCell::new(resource),
             owner: Some(std::thread::current().id()),
             send: SEND,
+            status: ObjectStatus::new(),
         }
     }
 
@@ -68,7 +71,19 @@ impl ResourceCell {
         self.owner
     }
 
-    fn has_access(&self, id: ThreadId) -> bool {
+    pub fn status(&self) -> ObjectStatus {
+        self.status
+    }
+
+    pub fn modify(&mut self, frame: Frame) {
+        if !self.has_access(std::thread::current().id()) {
+            panic!("Accessing non send resource from another thread is forbidden.")
+        }
+
+        self.status.modified = frame;
+    }
+
+    pub fn has_access(&self, id: ThreadId) -> bool {
         self.send || self.owner == Some(id)
     }
 }
@@ -137,6 +152,16 @@ impl Resources {
         self.resources.get_mut(*id).map(|cell| cell.get_mut())
     }
 
+    pub fn modify<R: Resource>(&mut self, frame: Frame) {
+        let Some(id) = self.map.get(&TypeId::of::<R>()) else {
+            return;
+        };
+
+        self.resources[*id]
+            .as_mut()
+            .and_then(|cell| Some(cell.modify(frame)));
+    }
+
     pub fn contains<R: Resource>(&self) -> bool {
         self.map.contains_key(&TypeId::of::<R>())
     }
@@ -144,60 +169,6 @@ impl Resources {
     pub fn remove<R: Resource>(&mut self) -> Option<R> {
         let id = self.map.get(&TypeId::of::<R>())?;
         self.resources.remove(*id).map(|r| r.into())
-    }
-}
-
-pub struct Res<'a, R: Resource>(&'a R);
-impl<'a, R: Resource> Res<'a, R> {
-    pub fn new(resource: &'a R) -> Self {
-        Self(resource)
-    }
-}
-
-impl<'a, R: Resource> std::ops::Deref for Res<'a, R> {
-    type Target = R;
-
-    fn deref(&self) -> &Self::Target {
-        self.0
-    }
-}
-
-impl<'a, R: Resource> AsRef<R> for Res<'a, R> {
-    fn as_ref(&self) -> &R {
-        self.0
-    }
-}
-
-pub struct ResMut<'a, R: Resource>(&'a mut R);
-impl<'a, R: Resource> ResMut<'a, R> {
-    pub fn new(resource: &'a mut R) -> Self {
-        Self(resource)
-    }
-}
-
-impl<'a, R: Resource> std::ops::Deref for ResMut<'a, R> {
-    type Target = R;
-
-    fn deref(&self) -> &Self::Target {
-        self.0
-    }
-}
-
-impl<'a, R: Resource> std::ops::DerefMut for ResMut<'a, R> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0
-    }
-}
-
-impl<'a, R: Resource> AsRef<R> for ResMut<'a, R> {
-    fn as_ref(&self) -> &R {
-        self.0
-    }
-}
-
-impl<'a, R: Resource> AsMut<R> for ResMut<'a, R> {
-    fn as_mut(&mut self) -> &mut R {
-        self.0
     }
 }
 

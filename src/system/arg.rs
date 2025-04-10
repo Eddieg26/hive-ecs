@@ -1,9 +1,9 @@
 use super::{IntoSystemConfigs, SystemConfig, SystemConfigs, SystemId, SystemMeta};
-use std::{any::Any, sync::Arc};
 use crate::{
     system::{Access, SystemAccess},
-    world::{Entities, NonSend, NonSendMut, Res, ResMut, Resource, ResourceId, World, WorldCell},
+    world::{Entities, NonSend, NonSendMut, Resource, ResourceId, World, WorldCell},
 };
+use std::{any::Any, sync::Arc};
 
 #[allow(unused_variables)]
 pub unsafe trait SystemArg: Sized {
@@ -97,8 +97,8 @@ unsafe impl SystemArg for &Entities {
     }
 }
 
-unsafe impl<R: Resource + Send> SystemArg for Res<'_, R> {
-    type Item<'world, 'state> = Res<'world, R>;
+unsafe impl<R: Resource + Send> SystemArg for &R {
+    type Item<'world, 'state> = &'world R;
 
     type State = ResourceId;
 
@@ -111,7 +111,7 @@ unsafe impl<R: Resource + Send> SystemArg for Res<'_, R> {
         world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
-        unsafe { world.get().res() }
+        unsafe { world.get().resource() }
     }
 
     fn access(state: &Self::State) -> Vec<SystemAccess> {
@@ -119,8 +119,8 @@ unsafe impl<R: Resource + Send> SystemArg for Res<'_, R> {
     }
 }
 
-unsafe impl<R: Resource + Send> SystemArg for ResMut<'_, R> {
-    type Item<'world, 'state> = ResMut<'world, R>;
+unsafe impl<R: Resource + Send> SystemArg for &mut R {
+    type Item<'world, 'state> = &'world mut R;
 
     type State = ResourceId;
 
@@ -133,7 +133,7 @@ unsafe impl<R: Resource + Send> SystemArg for ResMut<'_, R> {
         mut world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
-        unsafe { world.get_mut().res_mut() }
+        unsafe { world.get_mut().resource_mut() }
     }
 
     fn access(state: &Self::State) -> Vec<SystemAccess> {
@@ -155,7 +155,9 @@ unsafe impl<R: Resource> SystemArg for NonSend<'_, R> {
         world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
-        unsafe { world.get().non_send_res() }
+        let resource = unsafe { world.get().non_send_resource::<R>() };
+
+        NonSend::new(resource)
     }
 
     fn send() -> bool {
@@ -181,7 +183,9 @@ unsafe impl<R: Resource> SystemArg for NonSendMut<'_, R> {
         mut world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
-        unsafe { world.get_mut().non_send_res_mut() }
+        let resource = unsafe { world.get_mut().non_send_resource_mut::<R>() };
+
+        NonSendMut::new(resource)
     }
 
     fn send() -> bool {
@@ -190,6 +194,42 @@ unsafe impl<R: Resource> SystemArg for NonSendMut<'_, R> {
 
     fn access(state: &Self::State) -> Vec<SystemAccess> {
         vec![SystemAccess::resource(*state, Access::Write)]
+    }
+}
+
+unsafe impl<A: SystemArg> SystemArg for Option<A> {
+    type Item<'world, 'state> = Option<A::Item<'world, 'state>>;
+
+    type State = A::State;
+
+    fn init(world: &mut World) -> Self::State {
+        A::init(world)
+    }
+
+    unsafe fn validate(state: &Self::State, world: WorldCell, system: &SystemMeta) -> bool {
+        unsafe { A::validate(state, world, system) }
+    }
+
+    unsafe fn get<'world, 'state>(
+        state: &'state mut Self::State,
+        world: WorldCell<'world>,
+        system: &SystemMeta,
+    ) -> Self::Item<'world, 'state> {
+        unsafe {
+            if A::validate(state, world, system) {
+                Some(A::get(state, world, system))
+            } else {
+                None
+            }
+        }
+    }
+
+    fn send() -> bool {
+        A::send()
+    }
+
+    fn access(state: &Self::State) -> Vec<SystemAccess> {
+        A::access(state)
     }
 }
 

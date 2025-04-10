@@ -51,6 +51,10 @@ impl Archetype {
     pub fn remove_entity(&mut self, entity: Entity) -> Option<Row> {
         self.table.remove_entity(entity)
     }
+
+    pub fn modify_component(&mut self, entity: Entity, id: ComponentId, frame: Frame) {
+        self.table.modify_component(entity, id, frame);
+    }
 }
 
 pub struct Archetypes {
@@ -85,6 +89,18 @@ impl Archetypes {
         let id = self.components.register::<C>();
         self.bitset.reserve(id.to_usize());
         id
+    }
+
+    pub fn archetypes(&self) -> &Vec<Archetype> {
+        &self.archetypes
+    }
+
+    pub fn archetype(&self, id: ArchetypeId) -> Option<&Archetype> {
+        self.archetypes.get(id.0 as usize)
+    }
+
+    pub fn entity_archetype(&self, entity: Entity) -> Option<ArchetypeId> {
+        self.entity_map.get(&entity).copied()
     }
 
     pub fn components(&self) -> &Components {
@@ -216,6 +232,16 @@ impl Archetypes {
         }
 
         self.add_entity_inner(entity, row);
+    }
+
+    pub fn modify_component<C: Component>(&mut self, entity: Entity, frame: Frame) {
+        let id = unsafe { self.components.get_id_unchecked::<C>() };
+
+        let Some(archetype_id) = self.entity_map.get(&entity) else {
+            return;
+        };
+        let archetype = &mut self.archetypes[archetype_id.0 as usize];
+        archetype.modify_component(entity, id, frame);
     }
 
     #[inline]

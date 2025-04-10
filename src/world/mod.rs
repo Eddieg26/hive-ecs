@@ -98,62 +98,48 @@ impl World {
         self.resources.add::<false, R>(resource);
     }
 
-    pub fn resource<R: Resource>(&self) -> &R {
+    pub fn resource<R: Resource + Send>(&self) -> &R {
         self.resources.get::<R>().expect(&format!(
             "Resource not found: {}",
             std::any::type_name::<R>()
         ))
     }
 
-    pub fn resource_mut<R: Resource>(&mut self) -> &mut R {
+    pub fn resource_mut<R: Resource + Send>(&mut self) -> &mut R {
         self.resources.get_mut::<R>().expect(&format!(
             "Resource not found: {}",
             std::any::type_name::<R>()
         ))
     }
 
-    pub fn res<R: Resource + Send>(&self) -> Res<R> {
-        let resource = self.resource::<R>();
-        Res::new(resource)
-    }
-
-    pub fn res_mut<R: Resource + Send>(&mut self) -> ResMut<R> {
-        let resource = self.resource_mut::<R>();
-        ResMut::new(resource)
-    }
-
-    pub fn non_send_res<R: Resource>(&self) -> NonSend<R> {
-        let resource = self.resource::<R>();
-        NonSend::new(resource)
-    }
-
-    pub fn non_send_res_mut<R: Resource>(&mut self) -> NonSendMut<R> {
-        let resource = self.resource_mut::<R>();
-        NonSendMut::new(resource)
-    }
-
-    pub fn try_resource<R: Resource>(&self) -> Option<&R> {
+    pub fn try_resource<R: Resource + Send>(&self) -> Option<&R> {
         self.resources.get::<R>()
     }
 
-    pub fn try_resource_mut<R: Resource>(&mut self) -> Option<&mut R> {
+    pub fn try_resource_mut<R: Resource + Send>(&mut self) -> Option<&mut R> {
         self.resources.get_mut::<R>()
     }
 
-    pub fn try_res<R: Resource + Send>(&self) -> Option<Res<R>> {
-        self.resources.get::<R>().map(Res::new)
+    pub fn non_send_resource<R: Resource>(&self) -> &R {
+        self.resources.get::<R>().expect(&format!(
+            "Non Send Resource not found: {}",
+            std::any::type_name::<R>()
+        ))
     }
 
-    pub fn try_res_mut<R: Resource + Send>(&mut self) -> Option<ResMut<R>> {
-        self.resources.get_mut::<R>().map(ResMut::new)
+    pub fn non_send_resource_mut<R: Resource>(&mut self) -> &mut R {
+        self.resources.get_mut::<R>().expect(&format!(
+            "Non Send Resource not found: {}",
+            std::any::type_name::<R>()
+        ))
     }
 
-    pub fn try_non_send_res<R: Resource>(&self) -> Option<NonSend<R>> {
-        self.resources.get::<R>().map(NonSend::new)
+    pub fn try_non_send_resource<R: Resource>(&self) -> Option<&R> {
+        self.resources.get::<R>()
     }
 
-    pub fn try_non_send_resource_mut<R: Resource>(&mut self) -> Option<NonSendMut<R>> {
-        self.resources.get_mut::<R>().map(NonSendMut::new)
+    pub fn try_non_send_resource_mut<R: Resource>(&mut self) -> Option<&mut R> {
+        self.resources.get_mut::<R>()
     }
 
     pub fn remove_resource<R: Resource>(&mut self) -> Option<R> {
@@ -196,5 +182,13 @@ impl World {
 
     pub fn remove_components(&mut self, entity: Entity, components: Vec<ComponentId>) {
         self.archetypes.remove_components(entity, components);
+    }
+
+    pub fn modify_component<C: Component>(&mut self, entity: Entity) {
+        self.archetypes.modify_component::<C>(entity, self.frame);
+    }
+
+    pub fn modify_resource<R: Resource>(&mut self) {
+        self.resources.modify::<R>(self.frame);
     }
 }

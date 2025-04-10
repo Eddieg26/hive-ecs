@@ -1,4 +1,7 @@
-use std::hash::Hash;
+use std::{
+    hash::Hash,
+    ops::{Index, IndexMut},
+};
 
 pub trait SparseIndex: Copy + Clone + PartialEq + Eq + Hash {
     fn to_usize(self) -> usize;
@@ -107,6 +110,29 @@ where
         } else {
             false
         }
+    }
+}
+
+impl<I: SparseIndex, V> Index<I> for SparseArray<I, V> {
+    type Output = Option<V>;
+
+    fn index(&self, index: I) -> &Self::Output {
+        let index = index.to_usize();
+        if index < self.values.len() {
+            &self.values[index]
+        } else {
+            &None
+        }
+    }
+}
+
+impl<I: SparseIndex, V> IndexMut<I> for SparseArray<I, V> {
+    fn index_mut(&mut self, index: I) -> &mut Self::Output {
+        let index = index.to_usize();
+        if index >= self.values.len() {
+            self.values.resize_with(index + 1, || None);
+        }
+        &mut self.values[index]
     }
 }
 
