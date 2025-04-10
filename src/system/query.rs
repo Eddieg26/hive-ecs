@@ -20,22 +20,6 @@ pub trait BaseQuery {
 
     fn init(components: &Components, query: &mut ArchetypeQuery) -> Self::Data;
 
-    fn state<'w>(data: &Self::Data, archetype: &'w Archetype) -> Self::State<'w>;
-
-    fn get<'w>(
-        state: &mut Self::State<'w>,
-        current_frame: Frame,
-        entity: Entity,
-        row: RowIndex,
-    ) -> Self::Item<'w>;
-}
-
-pub trait BaseFilter {
-    type State<'w>;
-    type Data: Send + Sync + Sized;
-
-    fn init(components: &Components, state: &mut ArchetypeQuery) -> Self::Data;
-
     fn state<'w>(
         data: &Self::Data,
         archetype: &'w Archetype,
@@ -43,13 +27,18 @@ pub trait BaseFilter {
         system_frame: Frame,
     ) -> Self::State<'w>;
 
-    fn filter<'w>(_: &mut Self::State<'w>, _: Entity, _: RowIndex) -> bool {
-        true
-    }
+    fn get<'w>(state: &mut Self::State<'w>, entity: Entity, row: RowIndex) -> Self::Item<'w>;
 }
 
-impl BaseFilter for () {
+pub trait BaseFilter: for<'w> BaseQuery<Item<'w> = bool> {}
+
+impl<Q: for<'w> BaseQuery<Item<'w> = bool>> BaseFilter for Q {}
+
+impl BaseQuery for () {
+    type Item<'w> = bool;
+
     type State<'w> = ();
+
     type Data = ();
 
     fn init(_: &Components, _: &mut ArchetypeQuery) -> Self::Data {
@@ -59,11 +48,18 @@ impl BaseFilter for () {
     fn state<'w>(_: &Self::Data, _: &'w Archetype, _: Frame, _: Frame) -> Self::State<'w> {
         ()
     }
+
+    fn get<'w>(_: &mut Self::State<'w>, _: Entity, _: RowIndex) -> Self::Item<'w> {
+        true
+    }
 }
 
 pub struct Not<C: Component>(std::marker::PhantomData<C>);
-impl<C: Component> BaseFilter for Not<C> {
+impl<C: Component> BaseQuery for Not<C> {
+    type Item<'w> = bool;
+
     type State<'w> = ();
+
     type Data = ();
 
     fn init(components: &Components, state: &mut ArchetypeQuery) -> Self::Data {
@@ -80,10 +76,15 @@ impl<C: Component> BaseFilter for Not<C> {
     fn state<'w>(_: &Self::Data, _: &'w Archetype, _: Frame, _: Frame) -> Self::State<'w> {
         ()
     }
+
+    fn get<'w>(_: &mut Self::State<'w>, _: Entity, _: RowIndex) -> Self::Item<'w> {
+        true
+    }
 }
 
 pub struct With<C: Component>(std::marker::PhantomData<C>);
-impl<C: Component> BaseFilter for With<C> {
+impl<C: Component> BaseQuery for With<C> {
+    type Item<'w> = bool;
     type State<'w> = ();
     type Data = ();
 
@@ -101,6 +102,10 @@ impl<C: Component> BaseFilter for With<C> {
     fn state<'w>(_: &Self::Data, _: &'w Archetype, _: Frame, _: Frame) -> Self::State<'w> {
         ()
     }
+
+    fn get<'w>(_: &mut Self::State<'w>, _: Entity, _: RowIndex) -> Self::Item<'w> {
+        todo!()
+    }
 }
 
 pub struct Added<T: 'static>(std::marker::PhantomData<T>);
@@ -110,7 +115,8 @@ pub struct AddedComponent<'w, C: Component> {
     system_frame: Frame,
 }
 
-impl<C: Component> BaseFilter for Added<C> {
+impl<C: Component> BaseQuery for Added<C> {
+    type Item<'w> = bool;
     type State<'w> = AddedComponent<'w, C>;
     type Data = ComponentId;
 
@@ -137,7 +143,7 @@ impl<C: Component> BaseFilter for Added<C> {
         }
     }
 
-    fn filter<'w>(state: &mut Self::State<'w>, _: Entity, row: RowIndex) -> bool {
+    fn get<'w>(state: &mut Self::State<'w>, _: Entity, row: RowIndex) -> Self::Item<'w> {
         match state.reader.as_ref() {
             Some(reader) => reader.components.frames()[row.to_usize()]
                 .added
@@ -154,7 +160,8 @@ pub struct ModifiedComponent<'w, C: Component> {
     system_frame: Frame,
 }
 
-impl<C: Component> BaseFilter for Modified<C> {
+impl<C: Component> BaseQuery for Modified<C> {
+    type Item<'w> = bool;
     type State<'w> = ModifiedComponent<'w, C>;
     type Data = ComponentId;
 
@@ -181,7 +188,7 @@ impl<C: Component> BaseFilter for Modified<C> {
         }
     }
 
-    fn filter<'w>(state: &mut Self::State<'w>, _: Entity, row: RowIndex) -> bool {
+    fn get<'w>(state: &mut Self::State<'w>, _: Entity, row: RowIndex) -> Self::Item<'w> {
         match state.reader.as_ref() {
             Some(reader) => {
                 let modified = reader.components.frames()[row.to_usize()].modified;
@@ -224,7 +231,12 @@ impl<C: Component> BaseQuery for &C {
         id
     }
 
-    fn state<'w>(data: &Self::Data, archetype: &'w Archetype) -> Self::State<'w> {
+    fn state<'w>(
+        data: &Self::Data,
+        archetype: &'w Archetype,
+        _: Frame,
+        _: Frame,
+    ) -> Self::State<'w> {
         let components = archetype.table().get_column(*data).expect(&format!(
             "Component not found in archetype: {}",
             std::any::type_name::<C>()
@@ -233,12 +245,7 @@ impl<C: Component> BaseQuery for &C {
         ReadQuery::from(components)
     }
 
-    fn get<'w>(
-        state: &mut Self::State<'w>,
-        _: Frame,
-        entity: Entity,
-        row: RowIndex,
-    ) -> Self::Item<'w> {
+    fn get<'w>(state: &mut Self::State<'w>, entity: Entity, row: RowIndex) -> Self::Item<'w> {
         state
             .components
             .get(row.to_usize())
@@ -249,14 +256,20 @@ impl<C: Component> BaseQuery for &C {
 pub struct WriteQuery<'a, C: Component> {
     components: Ptr<'a, C>,
     frames: Ptr<'a, ObjectStatus>,
+    current_frame: Frame,
     _marker: std::marker::PhantomData<C>,
 }
 
 impl<'a, C: Component> WriteQuery<'a, C> {
-    pub fn new(components: Ptr<'a, C>, frames: Ptr<'a, ObjectStatus>) -> Self {
+    pub fn new(
+        components: Ptr<'a, C>,
+        frames: Ptr<'a, ObjectStatus>,
+        current_frame: Frame,
+    ) -> Self {
         Self {
             components,
             frames,
+            current_frame,
             _marker: std::marker::PhantomData,
         }
     }
@@ -273,7 +286,12 @@ impl<C: Component> BaseQuery for &mut C {
         <&C as BaseQuery>::init(components, query)
     }
 
-    fn state<'w>(data: &Self::Data, archetype: &'w Archetype) -> Self::State<'w> {
+    fn state<'w>(
+        data: &Self::Data,
+        archetype: &'w Archetype,
+        current_frame: Frame,
+        _: Frame,
+    ) -> Self::State<'w> {
         let (components, frames) = unsafe {
             archetype
                 .table()
@@ -285,21 +303,16 @@ impl<C: Component> BaseQuery for &mut C {
                 .get_ptr()
         };
 
-        WriteQuery::new(components, frames)
+        WriteQuery::new(components, frames, current_frame)
     }
 
-    fn get<'w>(
-        state: &mut Self::State<'w>,
-        current_frame: Frame,
-        entity: Entity,
-        row: RowIndex,
-    ) -> Self::Item<'w> {
+    fn get<'w>(state: &mut Self::State<'w>, entity: Entity, row: RowIndex) -> Self::Item<'w> {
         let component = state
             .components
             .get_mut(row.to_usize())
             .expect(&format!("Component not found for entity: {:?}", entity));
 
-        state.frames.get_mut(row.0 as usize).unwrap().modified = current_frame;
+        state.frames.get_mut(row.0 as usize).unwrap().modified = state.current_frame;
 
         component
     }
@@ -321,21 +334,21 @@ impl<C: Component> BaseQuery for Option<&C> {
         id
     }
 
-    fn state<'w>(data: &Self::Data, archetype: &'w Archetype) -> Self::State<'w> {
+    fn state<'w>(
+        data: &Self::Data,
+        archetype: &'w Archetype,
+        _: Frame,
+        _: Frame,
+    ) -> Self::State<'w> {
         archetype
             .table()
             .get_column(*data)
             .map(|column| ReadQuery::from(column))
     }
 
-    fn get<'w>(
-        state: &mut Self::State<'w>,
-        current_frame: Frame,
-        entity: Entity,
-        row: RowIndex,
-    ) -> Self::Item<'w> {
+    fn get<'w>(state: &mut Self::State<'w>, entity: Entity, row: RowIndex) -> Self::Item<'w> {
         match state {
-            Some(state) => Some(<&C as BaseQuery>::get(state, current_frame, entity, row)),
+            Some(state) => Some(<&C as BaseQuery>::get(state, entity, row)),
             None => None,
         }
     }
@@ -357,26 +370,21 @@ impl<C: Component> BaseQuery for Option<&mut C> {
         id
     }
 
-    fn state<'w>(data: &Self::Data, archetype: &'w Archetype) -> Self::State<'w> {
+    fn state<'w>(
+        data: &Self::Data,
+        archetype: &'w Archetype,
+        current_frame: Frame,
+        _: Frame,
+    ) -> Self::State<'w> {
         archetype.table().get_column(*data).map(|column| {
             let (components, frames) = unsafe { column.get_ptr() };
-            WriteQuery::new(components, frames)
+            WriteQuery::new(components, frames, current_frame)
         })
     }
 
-    fn get<'w>(
-        state: &mut Self::State<'w>,
-        current_frame: Frame,
-        entity: Entity,
-        row: RowIndex,
-    ) -> Self::Item<'w> {
+    fn get<'w>(state: &mut Self::State<'w>, entity: Entity, row: RowIndex) -> Self::Item<'w> {
         match state {
-            Some(state) => Some(<&mut C as BaseQuery>::get(
-                state,
-                current_frame,
-                entity,
-                row,
-            )),
+            Some(state) => Some(<&mut C as BaseQuery>::get(state, entity, row)),
             None => None,
         }
     }
@@ -393,11 +401,11 @@ impl BaseQuery for Entity {
         ()
     }
 
-    fn state<'w>(_: &Self::Data, _: &'w Archetype) -> Self::State<'w> {
+    fn state<'w>(_: &Self::Data, _: &'w Archetype, _: Frame, _: Frame) -> Self::State<'w> {
         ()
     }
 
-    fn get<'w>(_: &mut Self::State<'w>, _: Frame, entity: Entity, _: RowIndex) -> Self::Item<'w> {
+    fn get<'w>(_: &mut Self::State<'w>, entity: Entity, _: RowIndex) -> Self::Item<'w> {
         entity
     }
 }
@@ -488,7 +496,12 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> QueryIter<'w, 's, Q, F> {
         let (state, filter_state, entities) = archetypes
             .get(0)
             .map(|archetype| {
-                let state = Q::state(&query.state.data, archetype);
+                let state = Q::state(
+                    &query.state.data,
+                    archetype,
+                    query.current_frame,
+                    query.system_frame,
+                );
                 let filter_state = F::state(
                     &query.state.filter_data,
                     archetype,
@@ -531,16 +544,21 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> Iterator for QueryIter<'w, 's, Q, F> {
                 .unwrap();
 
             let state = self.state.as_mut()?;
-            let filter = match self.filter.as_mut() {
-                Some(state) => F::filter(state, entity, row),
+            let filter = match &mut self.filter {
+                Some(state) => F::get(state, entity, row),
                 None => true,
             };
 
-            filter.then_some(Q::get(state, self.query.system_frame, entity, row))
+            filter.then_some(Q::get(state, entity, row))
         } else {
             self.archetype += 1;
             self.entities = self.archetypes.get(self.archetype).map(|archetype| {
-                self.state = Some(Q::state(&self.query.state.data, archetype));
+                self.state = Some(Q::state(
+                    &self.query.state.data,
+                    archetype,
+                    self.query.current_frame,
+                    self.query.system_frame,
+                ));
                 self.filter = Some(F::state(
                     &self.query.state.filter_data,
                     archetype,
@@ -571,49 +589,18 @@ macro_rules! impl_base_query_for_tuples {
                     ($($name::init(components, query),)*)
                 }
 
-                fn state<'w>(data: &Self::Data, archetype: &'w Archetype) -> Self::State<'w> {
+                fn state<'w>(data: &Self::Data, archetype: &'w Archetype, current_frame: Frame, system_frame: Frame) -> Self::State<'w> {
                     let ($($name,)*) = data;
-                    ($($name::state($name, archetype),)*)
+                    ($($name::state($name, archetype, current_frame, system_frame),)*)
                 }
 
-                fn get<'w>(state: &mut Self::State<'w>, frame: Frame, entity: Entity, row: RowIndex) -> Self::Item<'w> {
+                fn get<'w>(state: &mut Self::State<'w>, entity: Entity, row: RowIndex) -> Self::Item<'w> {
                     let ($($name,)*) = state;
 
                     ($(
-                        $name::get($name, frame, entity, row),
+                        $name::get($name, entity, row),
                     )*)
 
-                }
-            }
-        )+
-    };
-
-    ($(($($name:ident),*)),*)  => {
-        $(
-            #[allow(non_snake_case)]
-            impl<$($name: BaseFilter),+> BaseFilter for ($($name),+) {
-                type State<'w> = ($($name::State<'w>), +);
-                type Data = ($($name::Data), +);
-
-                fn init(components: &Components, query: &mut ArchetypeQuery) -> Self::Data {
-                    ($($name::init(components, query),)*)
-                }
-
-                fn state<'w>(data: &Self::Data, archetype: &'w Archetype,  current: Frame, last: Frame,) -> Self::State<'w> {
-                    let ($($name,)*) = data;
-                    ($($name::state($name, archetype, current, last),)*)
-                }
-
-                fn filter<'w>(state: &mut Self::State<'w>, entity: Entity, row: RowIndex) -> bool {
-                    let ($($name,)*) = state;
-
-                    let filter = true;
-
-                    ($(
-                        filter = $name::filter($name, entity, row) && filter,
-                    )*)
-
-                    filter
                 }
             }
         )+
@@ -679,6 +666,6 @@ mod tests {
         let mut state =
             Modified::<i32>::state(&modified_filter, &archetype, current_frame, system_frame);
         let row = RowIndex(0);
-        assert!(Modified::<i32>::filter(&mut state, Entity::root(0), row));
+        assert!(Modified::<i32>::get(&mut state, Entity::root(0), row));
     }
 }
