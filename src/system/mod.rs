@@ -5,6 +5,7 @@ use crate::{
 use std::{any::Any, borrow::Cow, sync::Arc};
 
 pub mod arg;
+pub mod graph;
 pub mod query;
 pub mod schedule;
 
@@ -86,14 +87,10 @@ impl SystemConfig {
             frame: world.frame().previous(),
         };
 
-        let system = System {
+        SystemNode {
             meta,
             state,
             execute: self.execute,
-        };
-
-        SystemNode {
-            system,
             dependencies: self.dependencies,
             access,
         }
@@ -101,9 +98,11 @@ impl SystemConfig {
 }
 
 pub struct SystemNode {
-    pub(super) system: System,
-    pub(super) dependencies: Vec<SystemId>,
-    pub(super) access: Vec<SystemAccess>,
+    meta: SystemMeta,
+    state: Box<dyn Any + Send + Sync>,
+    execute: Arc<dyn Fn(&mut Box<dyn Any + Send + Sync>, WorldCell, &SystemMeta)>,
+    dependencies: Vec<SystemId>,
+    access: Vec<SystemAccess>,
 }
 
 pub enum SystemConfigs {

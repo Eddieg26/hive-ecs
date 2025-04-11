@@ -28,7 +28,7 @@ impl Bitset {
         self.bits[word] |= 1 << bit;
     }
 
-    pub fn clear(&mut self, index: usize) {
+    pub fn reset_bit(&mut self, index: usize) {
         let (word, bit) = (index / 64, index % 64);
         if word < self.bits.len() {
             self.bits[word] &= !(1 << bit);
@@ -74,13 +74,13 @@ impl Bitset {
         self.bits.is_empty()
     }
 
-    pub fn clear_all(&mut self) {
+    pub fn reset(&mut self) {
         for word in &mut self.bits {
             *word = 0;
         }
     }
 
-    pub fn reset(&mut self) {
+    pub fn clear(&mut self) {
         self.bits.clear();
     }
 
@@ -127,60 +127,55 @@ impl<'a> Iterator for BitsetIter<'a> {
 }
 
 pub struct AccessBitset {
-    read: Bitset,
-    write: Bitset,
+    bits: Bitset,
 }
 
 impl AccessBitset {
     pub fn new() -> Self {
         Self {
-            read: Bitset::new(),
-            write: Bitset::new(),
+            bits: Bitset::new(),
         }
     }
 
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            read: Bitset::with_capacity(capacity),
-            write: Bitset::with_capacity(capacity),
+            bits: Bitset::with_capacity(capacity * 2),
         }
+    }
+
+    pub fn get(&self, index: usize) -> (bool, bool) {
+        let index = index * 2;
+        let read = self.bits.get(index);
+        let write = self.bits.get(index + 1);
+        (read, write)
     }
 
     /// Sets the read bit for the given index.
     /// Returns `true` if the read bit was successfully set, otherwise `false`.
     pub fn read(&mut self, index: usize) -> bool {
-        if self.write.get(index) {
-            false
+        if self.bits.get(index + 1) {
+            return false;
         } else {
-            self.read.set(index);
-            true
+            self.bits.set(index);
+            return true;
         }
     }
 
     /// Sets the write bit for the given index.
     /// Returns `true` if the write bit was successfully set, otherwise `false`.
     pub fn write(&mut self, index: usize) -> bool {
-        if self.read.get(index) || self.write.get(index) {
-            false
+        let (read, write) = self.get(index);
+        if read || write {
+            return false;
         } else {
-            self.write.set(index);
-            true
+            self.bits.set(index + 1);
+            return true;
         }
     }
 
-    pub fn clear_read(&mut self, index: usize) {
-        self.read.clear(index);
-    }
-
-    pub fn clear_write(&mut self, index: usize) {
-        self.write.clear(index);
-    }
-
-    pub fn get_read(&self, index: usize) -> bool {
-        self.read.get(index)
-    }
-
-    pub fn get_write(&self, index: usize) -> bool {
-        self.write.get(index)
+    pub fn reset_access(&mut self, index: usize) {
+        let index = index * 2;
+        self.bits.reset_bit(index);
+        self.bits.reset_bit(index + 1);
     }
 }
