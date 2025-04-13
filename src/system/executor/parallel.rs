@@ -1,7 +1,5 @@
-use crate::{
-    system::{System, SystemConfig},
-    world::{World, WorldCell},
-};
+use super::{GraphInfo, SystemExecutor};
+use crate::{system::System, world::WorldCell};
 use fixedbitset::FixedBitSet;
 use std::{
     sync::{
@@ -11,34 +9,21 @@ use std::{
     thread::Scope,
 };
 
-use super::SystemExecutor;
-
 pub struct ParallelExecutor {
-    pub(super) state: Arc<Mutex<ExecutionState>>,
-    pub(super) dependents: Vec<FixedBitSet>,
-    pub(super) dependencies: Box<[usize]>,
-    pub(super) systems: Box<[System]>,
-    pub(super) initial_systems: FixedBitSet,
+    state: Arc<Mutex<ExecutionState>>,
+    dependents: Vec<FixedBitSet>,
+    dependencies: Box<[usize]>,
+    systems: Box<[System]>,
+    initial_systems: FixedBitSet,
 }
 
 impl ParallelExecutor {
-    pub fn new(world: &mut World, configs: Vec<SystemConfig>) -> Self {
-        let mut nodes = vec![];
-        for config in configs {
-            let node = config.into_system_node(world);
-            nodes.push(node);
-        }
-
-        let mut dependents = vec![FixedBitSet::with_capacity(nodes.len()); nodes.len()];
-        let mut dependencies = vec![0usize; nodes.len()];
-        for (index, node) in nodes.iter().rev().enumerate() {
-            for (dep_index, dep_node) in nodes.iter().take(index).enumerate() {
-                if node.has_dependency(dep_node) {
-                    dependents[dep_index].set(index, true);
-                    dependencies[index] += 1;
-                }
-            }
-        }
+    pub fn new(info: GraphInfo) -> Self {
+        let GraphInfo {
+            mut nodes,
+            dependents,
+            dependencies,
+        } = info;
 
         let mut initial_systems = FixedBitSet::with_capacity(nodes.len());
         for (index, deps) in dependencies.iter().enumerate() {
@@ -194,7 +179,7 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
     }
 
     fn run_system(&self, index: usize) {
-        self.systems[index].execute(self.world);
+        self.systems[index].run(self.world);
         self.system_done(index);
     }
 

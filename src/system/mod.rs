@@ -69,7 +69,7 @@ pub struct SystemConfig {
     dependencies: HashSet<SystemId>,
     init: fn(&mut World) -> Box<dyn Any + Send + Sync>,
     access: fn(&Box<dyn Any + Send + Sync>) -> Vec<SystemAccess>,
-    execute: SystemExecute,
+    execute: SystemRun,
 }
 
 impl SystemConfig {
@@ -102,26 +102,30 @@ impl SystemConfig {
         };
 
         SystemNode {
-            meta,
-            state,
-            execute: self.execute,
+            system: System::new(meta, state, self.execute),
             dependencies: self.dependencies,
         }
     }
 }
 
 pub struct SystemNode {
-    pub meta: SystemMeta,
-    pub state: Box<dyn Any + Send + Sync>,
-    pub execute: Box<dyn Fn(&Box<dyn Any + Send + Sync>, WorldCell, &SystemMeta) + Send + Sync>,
+    pub system: System,
     pub dependencies: HashSet<SystemId>,
 }
 
 impl SystemNode {
     pub fn has_dependency(&self, other: &SystemNode) -> bool {
-        self.dependencies.contains(&other.meta.id)
-            || self.meta.components.conflicts(&other.meta.components)
-            || self.meta.resources.conflicts(&other.meta.resources)
+        self.dependencies.contains(&other.system.meta.id)
+            || self
+                .system
+                .meta
+                .components
+                .conflicts(&other.system.meta.components)
+            || self
+                .system
+                .meta
+                .resources
+                .conflicts(&other.system.meta.resources)
     }
 }
 
@@ -222,35 +226,26 @@ impl IntoSystemConfigs<()> for SystemConfigs {
 }
 
 pub type SystemState = Box<dyn Any + Send + Sync>;
-pub type SystemExecute =
-    Box<dyn Fn(&Box<dyn Any + Send + Sync>, WorldCell, &SystemMeta) + Send + Sync>;
+pub type SystemRun = Box<dyn Fn(&Box<dyn Any + Send + Sync>, WorldCell, &SystemMeta) + Send + Sync>;
 
 pub struct System {
     meta: SystemMeta,
     state: SystemState,
-    execute: SystemExecute,
+    run: SystemRun,
 }
 
 impl System {
-    pub fn new(meta: SystemMeta, state: SystemState, execute: SystemExecute) -> Self {
-        Self {
-            meta,
-            state,
-            execute,
-        }
+    pub fn new(meta: SystemMeta, state: SystemState, run: SystemRun) -> Self {
+        Self { meta, state, run }
     }
 
-    pub fn execute(&self, world: WorldCell) {
-        (self.execute)(&self.state, world, &self.meta);
+    pub fn run(&self, world: WorldCell) {
+        (self.run)(&self.state, world, &self.meta);
     }
 }
 
 impl From<SystemNode> for System {
     fn from(value: SystemNode) -> Self {
-        Self {
-            meta: value.meta,
-            state: value.state,
-            execute: value.execute,
-        }
+        value.system
     }
 }
