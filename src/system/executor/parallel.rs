@@ -1,4 +1,7 @@
-use crate::{system::System, world::WorldCell};
+use crate::{
+    system::{System, SystemConfig},
+    world::{World, WorldCell},
+};
 use fixedbitset::FixedBitSet;
 use std::{
     sync::{
@@ -8,16 +11,65 @@ use std::{
     thread::Scope,
 };
 
+use super::SystemExecutor;
+
 pub struct ParallelExecutor {
-    state: Arc<Mutex<ExecutionState>>,
-    dependents: Vec<FixedBitSet>,
-    dependencies: Box<[usize]>,
-    systems: Box<[System]>,
-    initial_systems: FixedBitSet,
+    pub(super) state: Arc<Mutex<ExecutionState>>,
+    pub(super) dependents: Vec<FixedBitSet>,
+    pub(super) dependencies: Box<[usize]>,
+    pub(super) systems: Box<[System]>,
+    pub(super) initial_systems: FixedBitSet,
 }
 
 impl ParallelExecutor {
-    pub fn run(&self, world: WorldCell) {
+    pub fn new(world: &mut World, configs: Vec<SystemConfig>) -> Self {
+        let mut nodes = vec![];
+        for config in configs {
+            let node = config.into_system_node(world);
+            nodes.push(node);
+        }
+
+        let mut dependents = vec![FixedBitSet::with_capacity(nodes.len()); nodes.len()];
+        let mut dependencies = vec![0usize; nodes.len()];
+        for (index, node) in nodes.iter().rev().enumerate() {
+            for (dep_index, dep_node) in nodes.iter().take(index).enumerate() {
+                if node.has_dependency(dep_node) {
+                    dependents[dep_index].set(index, true);
+                    dependencies[index] += 1;
+                }
+            }
+        }
+
+        let mut initial_systems = FixedBitSet::with_capacity(nodes.len());
+        for (index, deps) in dependencies.iter().enumerate() {
+            initial_systems.set(index, *deps == 0);
+        }
+
+        let state = ExecutionState {
+            dependencies: dependencies.clone(),
+            queue: initial_systems.clone(),
+            completed: FixedBitSet::with_capacity(nodes.len()),
+        };
+
+        Self {
+            state: Arc::new(Mutex::new(state)),
+            dependents,
+            dependencies: dependencies.into_boxed_slice(),
+            systems: nodes.drain(..).map(System::from).collect(),
+            initial_systems,
+        }
+    }
+
+    fn reset(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.completed.clear();
+        state.queue = self.initial_systems.clone();
+        state.dependencies = self.dependencies.to_vec();
+    }
+}
+
+impl SystemExecutor for ParallelExecutor {
+    fn execute(&self, world: WorldCell) {
         let (sender, receiver) = channel::<ExecutionResult>();
 
         std::thread::scope(|scope| {
@@ -42,19 +94,22 @@ impl ParallelExecutor {
 
         self.reset();
     }
-
-    fn reset(&self) {
-        let mut state = self.state.lock().unwrap();
-        state.completed.clear();
-        state.queue = self.initial_systems.clone();
-        state.dependencies = self.dependencies.to_vec();
-    }
 }
 
 pub struct ExecutionState {
     dependencies: Vec<usize>,
     queue: FixedBitSet,
     completed: FixedBitSet,
+}
+
+impl Default for ExecutionState {
+    fn default() -> Self {
+        Self {
+            dependencies: Default::default(),
+            queue: Default::default(),
+            completed: Default::default(),
+        }
+    }
 }
 
 pub enum ExecutionResult {

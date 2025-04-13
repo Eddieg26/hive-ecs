@@ -52,4 +52,55 @@ impl AccessBitset {
             return true;
         }
     }
+
+    pub fn reads(&self, index: usize) -> bool {
+        self.bits[index * 2]
+    }
+
+    pub fn writes(&self, index: usize) -> bool {
+        self.bits[index * 2 + 1]
+    }
+
+    pub fn conflicts(&self, other: &AccessBitset) -> bool {
+        for i in 0..self.len() {
+            let (read, write) = self.get(i);
+            let (other_read, other_write) = other.get(i);
+
+            if ((read || write) && other_write) || (other_read && write) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    pub fn iter(&self) -> AccessBitsetIter {
+        AccessBitsetIter {
+            bits: self,
+            index: 0,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.bits.len() / 2
+    }
+}
+
+pub struct AccessBitsetIter<'a> {
+    bits: &'a AccessBitset,
+    index: usize,
+}
+
+impl<'a> Iterator for AccessBitsetIter<'a> {
+    type Item = (bool, bool);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.bits.len() {
+            let value = self.bits.get(self.index);
+            self.index += 1;
+            Some(value)
+        } else {
+            None
+        }
+    }
 }

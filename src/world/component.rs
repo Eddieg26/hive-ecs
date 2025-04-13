@@ -85,4 +85,8 @@ impl Components {
             .copied()
             .unwrap_or_else(|| panic!("Component not registered: {}", std::any::type_name::<C>()))
     }
+
+    pub fn len(&self) -> usize {
+        self.components.len()
+    }
 }

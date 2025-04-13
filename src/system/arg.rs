@@ -272,9 +272,9 @@ macro_rules! impl_into_system_configs {
                     name: Some(name.into()),
                     exclusive,
                     send,
-                    dependencies: Vec::new(),
+                    dependencies: std::collections::HashSet::new(),
                     init,
-                    execute: Arc::new(execute),
+                    execute: Box::new(execute),
                     access
                 })
             }
@@ -285,12 +285,12 @@ macro_rules! impl_into_system_configs {
 
                 match after_configs {
                     SystemConfigs::Config(mut config) => {
-                        config.dependencies.push(before.id);
+                        config.dependencies.insert(before.id);
                         SystemConfigs::Configs(vec![before, config])
                     }
                     SystemConfigs::Configs(mut configs) => {
                         configs.iter_mut().for_each(|config| {
-                            config.dependencies.push(before.id);
+                            config.dependencies.insert(before.id);
                         });
 
                         configs.insert(0, before);

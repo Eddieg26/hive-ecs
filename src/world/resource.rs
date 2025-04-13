@@ -170,6 +170,10 @@ impl Resources {
         let id = self.map.get(&TypeId::of::<R>())?;
         self.resources.remove(*id).map(|r| r.into())
     }
+
+    pub fn len(&self) -> usize {
+        self.resources.len()
+    }
 }
 
 pub struct NonSend<'a, R: Resource>(&'a R);
