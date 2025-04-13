@@ -16,7 +16,7 @@ pub struct ParallelExecutor {
 
 impl ParallelExecutor {
     pub fn run(&self, world: WorldCell) {
-        let (main_sender, receiver) = channel::<ExecutionResult>();
+        let (sender, receiver) = channel::<ExecutionResult>();
 
         let mut state = self.state.lock().unwrap();
         state.dependencies = self.dependencies.to_vec();
@@ -27,18 +27,15 @@ impl ParallelExecutor {
                 world,
                 &self.systems,
                 scope,
-                &main_sender,
+                &sender,
                 self.state.clone(),
             ));
 
-            ctx.run();
+            ctx.execute();
 
             for result in receiver.iter() {
                 match result {
-                    ExecutionResult::Run(index) => {
-                        self.systems[index].execute(world);
-                        ctx.system_done(index);
-                    }
+                    ExecutionResult::Run(index) => ctx.run_system(index),
                     ExecutionResult::Done => break,
                 }
             }
@@ -63,7 +60,7 @@ pub struct ExecutionContext<'scope, 'env: 'scope> {
     world: WorldCell<'scope>,
     systems: &'scope [System],
     scope: &'scope Scope<'scope, 'env>,
-    main_sender: &'env Sender<ExecutionResult>,
+    sender: &'env Sender<ExecutionResult>,
     state: Arc<Mutex<ExecutionState>>,
 }
 
@@ -72,56 +69,53 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
         world: WorldCell<'scope>,
         systems: &'scope [System],
         scope: &'scope Scope<'scope, 'env>,
-        main_sender: &'env Sender<ExecutionResult>,
+        sender: &'env Sender<ExecutionResult>,
         state: Arc<Mutex<ExecutionState>>,
     ) -> Self {
         Self {
             world,
             systems,
             scope,
-            main_sender,
+            sender,
             state,
         }
+    }
+
+    fn execute(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.queue = state.initial_systems.clone();
+
+        self.spawn_systems(state);
     }
 
     fn scoped(&self) -> Self {
         let world = self.world;
         let systems = self.systems;
         let scope = self.scope;
-        let main_sender = self.main_sender;
+        let sender = self.sender;
         let state = self.state.clone();
 
         Self {
             world,
             systems,
             scope,
-            main_sender,
+            sender,
             state,
         }
     }
 
     fn spawn(&self, index: usize) {
         let scoped = self.scoped();
-        scoped.scope.spawn(move || {
-            scoped.systems[index].execute(scoped.world);
-            scoped.system_done(index);
-        });
+        scoped.scope.spawn(move || scoped.run_system(index));
     }
 
     fn spawn_non_send(&self, index: usize) {
-        let _ = self.main_sender.send(ExecutionResult::Run(index));
+        self.sender.send(ExecutionResult::Run(index)).unwrap();
     }
 
-    fn run(&self) {
-        let mut state = self.state.lock().unwrap();
-        state.queue = state.initial_systems.clone();
-
-        self.run_systems(state);
-    }
-
-    fn run_systems(&self, mut state: MutexGuard<'_, ExecutionState>) {
+    fn spawn_systems(&self, mut state: MutexGuard<'_, ExecutionState>) {
         if state.completed.is_full() {
-            let _ = self.main_sender.send(ExecutionResult::Done);
+            let _ = self.sender.send(ExecutionResult::Done);
             return;
         }
 
@@ -133,6 +127,11 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
                 self.spawn_non_send(index);
             }
         }
+    }
+
+    fn run_system(&self, index: usize) {
+        self.systems[index].execute(self.world);
+        self.system_done(index);
     }
 
     fn system_done(&self, index: usize) {
@@ -148,6 +147,6 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
             }
         }
 
-        self.run_systems(state);
+        self.spawn_systems(state);
     }
 }
