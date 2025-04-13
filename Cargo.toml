@@ -4,5 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+async-executor = "1.13.1"
 downcast-rs = "2.0.1"
+fixedbitset = "0.5.7"
+futures-lite = "2.6.0"
 indexmap = "2.8.0"

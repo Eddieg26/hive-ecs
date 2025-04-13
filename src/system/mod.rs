@@ -1,10 +1,11 @@
 use crate::{
-    core::{Frame, bitset::Bitset},
+    core::{Frame, bitset::FixedBitSet},
     world::{ComponentId, ResourceId, World, cell::WorldCell},
 };
 use std::{any::Any, borrow::Cow, sync::Arc};
 
 pub mod arg;
+pub mod executor;
 pub mod graph;
 pub mod query;
 pub mod schedule;
@@ -50,9 +51,9 @@ pub struct SystemMeta {
     pub id: SystemId,
     pub name: Option<SystemName>,
     /// Components that the system accesses.
-    pub components: Bitset,
+    pub components: FixedBitSet,
     /// Resources that the system accesses.
-    pub resources: Bitset,
+    pub resources: FixedBitSet,
     /// The system contains only send resources.
     pub send: bool,
     /// The system should be ran exclusively in the given frame.
@@ -69,7 +70,7 @@ pub struct SystemConfig {
     dependencies: Vec<SystemId>,
     init: fn(&mut World) -> Box<dyn Any + Send + Sync>,
     access: fn(&Box<dyn Any + Send + Sync>) -> Vec<SystemAccess>,
-    execute: Arc<dyn Fn(&mut Box<dyn Any + Send + Sync>, WorldCell, &SystemMeta)>,
+    execute: Arc<dyn Fn(&Box<dyn Any + Send + Sync>, WorldCell, &SystemMeta)>,
 }
 
 impl SystemConfig {
@@ -80,8 +81,8 @@ impl SystemConfig {
         let meta = SystemMeta {
             id: self.id,
             name: self.name,
-            components: Bitset::new(),
-            resources: Bitset::new(),
+            components: FixedBitSet::new(),
+            resources: FixedBitSet::new(),
             send: self.send,
             exclusive: self.exclusive,
             frame: world.frame().previous(),
@@ -100,7 +101,7 @@ impl SystemConfig {
 pub struct SystemNode {
     meta: SystemMeta,
     state: Box<dyn Any + Send + Sync>,
-    execute: Arc<dyn Fn(&mut Box<dyn Any + Send + Sync>, WorldCell, &SystemMeta)>,
+    execute: Arc<dyn Fn(&Box<dyn Any + Send + Sync>, WorldCell, &SystemMeta)>,
     dependencies: Vec<SystemId>,
     access: Vec<SystemAccess>,
 }
@@ -204,11 +205,11 @@ impl IntoSystemConfigs<()> for SystemConfigs {
 pub struct System {
     meta: SystemMeta,
     state: Box<dyn Any + Send + Sync>,
-    execute: Arc<dyn Fn(&mut Box<dyn Any + Send + Sync>, WorldCell, &SystemMeta)>,
+    execute: Arc<dyn Fn(&Box<dyn Any + Send + Sync>, WorldCell, &SystemMeta) + Send + Sync>,
 }
 
 impl System {
-    pub fn execute(&mut self, world: WorldCell) {
-        (self.execute)(&mut self.state, world, &self.meta);
+    pub fn execute(&self, world: WorldCell) {
+        (self.execute)(&self.state, world, &self.meta);
     }
 }

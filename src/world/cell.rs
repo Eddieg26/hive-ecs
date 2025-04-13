@@ -20,3 +20,6 @@ impl<'w> WorldCell<'w> {
         unsafe { &mut *self.0 }
     }
 }
+
+unsafe impl<'w> Send for WorldCell<'w> {}
+unsafe impl<'w> Sync for WorldCell<'w> {}

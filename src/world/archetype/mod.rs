@@ -1,5 +1,5 @@
 use super::{Component, ComponentId, Components, Entity};
-use crate::core::{Frame, bitset::Bitset, storage::SparseIndex};
+use crate::core::{Frame, bitset::FixedBitSet, storage::SparseIndex};
 use std::{collections::HashMap, fmt::Debug};
 
 pub mod table;
@@ -16,11 +16,11 @@ impl ArchetypeId {
 pub struct Archetype {
     id: ArchetypeId,
     table: Table,
-    bitset: Bitset,
+    bitset: FixedBitSet,
 }
 
 impl Archetype {
-    pub fn new(id: ArchetypeId, table: Table, bitset: Bitset) -> Self {
+    pub fn new(id: ArchetypeId, table: Table, bitset: FixedBitSet) -> Self {
         Self { id, table, bitset }
     }
 
@@ -32,12 +32,12 @@ impl Archetype {
         &self.table
     }
 
-    pub fn contains(&self, components: &Bitset) -> bool {
-        self.bitset.contains(components)
+    pub fn contains(&self, components: &FixedBitSet) -> bool {
+        self.bitset.is_superset(components)
     }
 
     pub fn has_component(&self, component: usize) -> bool {
-        self.bitset.get(component)
+        self.bitset[component]
     }
 
     pub fn has_component_id(&self, id: ComponentId) -> bool {
@@ -62,7 +62,7 @@ pub struct Archetypes {
     archetype_map: HashMap<Box<[ComponentId]>, ArchetypeId>,
     entity_map: HashMap<Entity, ArchetypeId>,
     components: Components,
-    bitset: Bitset,
+    bitset: FixedBitSet,
 }
 
 impl Archetypes {
@@ -70,7 +70,7 @@ impl Archetypes {
         let archetypes = vec![Archetype::new(
             ArchetypeId::EMPTY,
             TableBuilder::new().build(),
-            Bitset::new(),
+            FixedBitSet::new(),
         )];
 
         let mut archetype_map: HashMap<Box<[ComponentId]>, ArchetypeId> = HashMap::new();
@@ -81,13 +81,13 @@ impl Archetypes {
             archetype_map,
             entity_map: HashMap::new(),
             components: Components::new(),
-            bitset: Bitset::new(),
+            bitset: FixedBitSet::new(),
         }
     }
 
     pub fn register<C: Component>(&mut self) -> ComponentId {
         let id = self.components.register::<C>();
-        self.bitset.reserve(id.to_usize());
+        self.bitset.grow(1);
         id
     }
 
@@ -114,17 +114,17 @@ impl Archetypes {
     pub fn query(&self, query: &ArchetypeQuery) -> Vec<&Archetype> {
         let mut include = self.bitset.clone();
         for id in query.components.iter().copied() {
-            include.set(id.to_usize());
+            include.set(id.to_usize(), true);
         }
 
         let mut exclude = self.bitset.clone();
         for id in query.exclude.iter() {
-            exclude.set(id.to_usize());
+            exclude.set(id.to_usize(), true);
         }
 
         let mut archetypes = Vec::new();
         for archetype in &self.archetypes {
-            if archetype.bitset.contains(&include) && !exclude.intersects(&archetype.bitset) {
+            if archetype.bitset.is_superset(&include) && exclude.is_disjoint(&archetype.bitset) {
                 archetypes.push(archetype);
             }
         }
@@ -261,7 +261,7 @@ impl Archetypes {
             }
             None => {
                 let mut bits = self.bitset.clone();
-                id.iter().for_each(|id| bits.set(id.to_usize()));
+                id.iter().for_each(|id| bits.set(id.to_usize(), true));
 
                 let archetype_id = ArchetypeId(self.archetypes.len() as u32);
                 let archetype = Archetype::new(archetype_id, components.into_table(entity), bits);

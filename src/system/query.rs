@@ -471,7 +471,7 @@ unsafe impl<Q: BaseQuery + 'static, F: BaseFilter + 'static> SystemArg for Query
     }
 
     unsafe fn get<'world, 'state>(
-        state: &'state mut Self::State,
+        state: &'state Self::State,
         world: WorldCell<'world>,
         system: &super::SystemMeta,
     ) -> Self::Item<'world, 'state> {
@@ -628,7 +628,7 @@ impl_base_query_for_tuples!((A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q))
 mod tests {
 
     use crate::{
-        core::bitset::Bitset,
+        core::bitset::FixedBitSet,
         world::archetype::{
             ArchetypeId,
             table::{Row, TableCell},
@@ -659,7 +659,7 @@ mod tests {
         let archetype = Archetype::new(
             ArchetypeId(0),
             row.into_table(Entity::root(0)),
-            Bitset::new(),
+            FixedBitSet::new(),
         );
 
         // Check if the filter detects the modification
