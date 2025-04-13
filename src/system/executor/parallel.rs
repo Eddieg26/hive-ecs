@@ -10,22 +10,21 @@ use std::{
 
 pub struct ParallelExecutor {
     state: Arc<Mutex<ExecutionState>>,
+    dependents: Vec<FixedBitSet>,
     dependencies: Box<[usize]>,
     systems: Box<[System]>,
+    initial_systems: FixedBitSet,
 }
 
 impl ParallelExecutor {
     pub fn run(&self, world: WorldCell) {
         let (sender, receiver) = channel::<ExecutionResult>();
 
-        let mut state = self.state.lock().unwrap();
-        state.dependencies = self.dependencies.to_vec();
-        drop(state);
-
         std::thread::scope(|scope| {
             let ctx = Arc::new(ExecutionContext::new(
                 world,
                 &self.systems,
+                &self.dependents,
                 scope,
                 &sender,
                 self.state.clone(),
@@ -40,13 +39,20 @@ impl ParallelExecutor {
                 }
             }
         });
+
+        self.reset();
+    }
+
+    fn reset(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.completed.clear();
+        state.queue = self.initial_systems.clone();
+        state.dependencies = self.dependencies.to_vec();
     }
 }
 
 pub struct ExecutionState {
-    dependents: Vec<FixedBitSet>,
     dependencies: Vec<usize>,
-    initial_systems: FixedBitSet,
     queue: FixedBitSet,
     completed: FixedBitSet,
 }
@@ -59,6 +65,7 @@ pub enum ExecutionResult {
 pub struct ExecutionContext<'scope, 'env: 'scope> {
     world: WorldCell<'scope>,
     systems: &'scope [System],
+    dependents: &'scope [FixedBitSet],
     scope: &'scope Scope<'scope, 'env>,
     sender: &'env Sender<ExecutionResult>,
     state: Arc<Mutex<ExecutionState>>,
@@ -68,6 +75,7 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
     pub fn new(
         world: WorldCell<'scope>,
         systems: &'scope [System],
+        dependents: &'scope [FixedBitSet],
         scope: &'scope Scope<'scope, 'env>,
         sender: &'env Sender<ExecutionResult>,
         state: Arc<Mutex<ExecutionState>>,
@@ -75,6 +83,7 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
         Self {
             world,
             systems,
+            dependents,
             scope,
             sender,
             state,
@@ -82,15 +91,14 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
     }
 
     fn execute(&self) {
-        let mut state = self.state.lock().unwrap();
-        state.queue = state.initial_systems.clone();
-
+        let state = self.state.lock().unwrap();
         self.spawn_systems(state);
     }
 
     fn scoped(&self) -> Self {
         let world = self.world;
         let systems = self.systems;
+        let dependents = self.dependents;
         let scope = self.scope;
         let sender = self.sender;
         let state = self.state.clone();
@@ -98,6 +106,7 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
         Self {
             world,
             systems,
+            dependents,
             scope,
             sender,
             state,
@@ -139,8 +148,7 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
 
         state.completed.set(index, true);
 
-        let dependents = state.dependents[index].clone();
-        for dependent in dependents.ones() {
+        for dependent in self.dependents[index].ones() {
             state.dependencies[dependent] -= 1;
             if state.dependencies[dependent] == 0 {
                 state.queue.set(dependent, true);
