@@ -141,6 +141,13 @@ impl SystemConfigs {
             SystemConfigs::Configs(configs) => configs.into_iter().next().unwrap(),
         }
     }
+
+    pub fn flatten(self) -> Vec<SystemConfig> {
+        match self {
+            SystemConfigs::Config(config) => vec![config],
+            SystemConfigs::Configs(configs) => configs,
+        }
+    }
 }
 
 impl AsRef<SystemConfig> for SystemConfigs {

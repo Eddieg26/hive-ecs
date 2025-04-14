@@ -3,7 +3,7 @@ use crate::{
     system::{Access, SystemAccess},
     world::{Entities, NonSend, NonSendMut, Resource, ResourceId, World, WorldCell},
 };
-use std::{any::Any, sync::Arc};
+use std::any::Any;
 
 #[allow(unused_variables)]
 pub unsafe trait SystemArg: Sized {

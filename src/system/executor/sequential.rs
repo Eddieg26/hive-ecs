@@ -1,9 +1,8 @@
 use super::{GraphInfo, SystemExecutor};
 use crate::system::System;
-use fixedbitset::FixedBitSet;
 
 pub struct SequentialExecutor {
-    systems: Vec<System>,
+    systems: Box<[System]>,
     order: Box<[usize]>,
 }
 
@@ -16,25 +15,27 @@ impl SequentialExecutor {
         } = info;
 
         let mut order = vec![];
-        let mut visited = FixedBitSet::with_capacity(nodes.len());
         let mut stack = vec![];
-        for index in 0..nodes.len() {
-            stack.push(index);
-            while let Some(node_index) = stack.pop() {
-                if visited[node_index] {
-                    continue;
-                }
 
-                if dependencies[node_index] == 0 {
-                    visited.set(node_index, true);
-                    order.push(node_index);
+        for (index, &dep_count) in dependencies.iter().enumerate() {
+            if dep_count == 0 {
+                stack.push(index);
+            }
+        }
 
-                    for dependent in dependents[node_index].ones() {
-                        dependencies[dependent] -= 1;
-                        stack.push(dependent);
-                    }
+        while let Some(node_index) = stack.pop() {
+            order.push(node_index);
+
+            for dependent in dependents[node_index].ones() {
+                dependencies[dependent] -= 1;
+                if dependencies[dependent] == 0 {
+                    stack.push(dependent);
                 }
             }
+        }
+
+        if order.len() != nodes.len() {
+            panic!("Cyclic dependency detected in the system graph!");
         }
 
         Self {

@@ -1,9 +1,17 @@
-use system::query::{Added, Query, QueryState};
+use app::App;
+use system::{
+    query::{Added, Query, QueryState},
+    schedule::Phase,
+};
 use world::Component;
 
+pub mod app;
 pub mod core;
 pub mod system;
 pub mod world;
+
+pub struct Update;
+impl Phase for Update {}
 
 fn main() {
     let mut world = world::World::new();
@@ -20,6 +28,8 @@ fn main() {
         println!("Query found age: {:?}", age);
         println!("Query found name: {:?}", name);
     }
+
+    App::new().build().run(Update);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

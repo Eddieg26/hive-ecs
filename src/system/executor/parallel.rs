@@ -11,7 +11,7 @@ use std::{
 
 pub struct ParallelExecutor {
     state: Arc<Mutex<ExecutionState>>,
-    dependents: Vec<FixedBitSet>,
+    dependents: Box<[FixedBitSet]>,
     dependencies: Box<[usize]>,
     systems: Box<[System]>,
     initial_systems: FixedBitSet,
@@ -38,7 +38,7 @@ impl ParallelExecutor {
 
         Self {
             state: Arc::new(Mutex::new(state)),
-            dependents,
+            dependents: dependents.into_boxed_slice(),
             dependencies: dependencies.into_boxed_slice(),
             systems: nodes.drain(..).map(System::from).collect(),
             initial_systems,

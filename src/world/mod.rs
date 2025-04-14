@@ -191,4 +191,6 @@ impl World {
     pub fn modify_resource<R: Resource>(&mut self) {
         self.resources.modify::<R>(self.frame);
     }
+
+    pub fn update(&mut self) {}
 }

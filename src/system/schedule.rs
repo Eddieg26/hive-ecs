@@ -1,69 +1,173 @@
-use crate::world::World;
-use super::{IntoSystemConfigs, System, SystemConfig, SystemConfigs};
-use std::{any::TypeId, collections::HashMap};
+use super::{
+    IntoSystemConfigs, SystemConfig,
+    executor::{GraphInfo, RunMode, SystemExecutor},
+};
+use crate::world::{World, WorldCell};
+use std::collections::{HashMap, HashSet};
+
+pub struct PhaseContext<'a> {
+    world: WorldCell<'a>,
+    executor: &'a dyn SystemExecutor,
+}
+
+impl<'a> PhaseContext<'a> {
+    pub(crate) fn new(world: WorldCell<'a>, executor: &'a dyn SystemExecutor) -> Self {
+        Self { world, executor }
+    }
+
+    pub unsafe fn world(&self) -> WorldCell {
+        self.world
+    }
+
+    pub fn execute(&self) {
+        self.executor.execute(self.world);
+    }
+}
 
 pub trait Phase: 'static {
-    fn run(&self) {}
+    fn run(&self, ctx: PhaseContext) {
+        ctx.execute();
+    }
 
-    fn type_id(&self) -> TypeId {
-        TypeId::of::<Self>()
+    fn name(&self) -> &'static str {
+        std::any::type_name::<Self>()
     }
 }
 
-#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
-pub struct PhaseId(u32);
-
-pub struct Schedule {
-    phases: Vec<Box<dyn Phase>>,
-    configs: Vec<Vec<SystemConfig>>,
-    phase_map: HashMap<TypeId, PhaseId>,
+pub struct PhaseConfig {
+    phase: Box<dyn Phase>,
+    configs: Vec<SystemConfig>,
 }
 
-impl Schedule {
-    pub fn new() -> Self {
+impl PhaseConfig {
+    pub fn new(phase: impl Phase) -> Self {
         Self {
-            phases: vec![],
+            phase: Box::new(phase),
             configs: vec![],
-            phase_map: HashMap::new(),
         }
     }
 
-    pub fn add_phase(&mut self, phase: impl Phase) -> PhaseId {
-        let ty = phase.type_id();
-        match self.phase_map.get(&ty).copied() {
-            Some(id) => {
-                self.phases[id.0 as usize] = Box::new(phase) as Box<dyn Phase>;
-                id
-            }
-            None => {
-                let id = PhaseId(self.phases.len() as u32);
-                self.phases.push(Box::new(phase));
-                self.phase_map.insert(ty, id);
-                self.configs.push(vec![]);
-                id
-            }
-        }
+    pub fn add_systems<M>(&mut self, systems: impl IntoSystemConfigs<M>) {
+        self.configs.extend(systems.configs().flatten());
     }
 
-    pub fn add_configs<M>(&mut self, phase: impl Phase, configs: impl IntoSystemConfigs<M>) {
-        let id = self.add_phase(phase);
-        let phase_configs = &mut self.configs[id.0 as usize];
+    pub fn build(self, world: &mut World, mode: RunMode) -> PhaseNode {
+        let info = GraphInfo::new(world, self.configs);
+        let executor = mode.create_executor(info);
 
-        match configs.configs() {
-            SystemConfigs::Config(config) => phase_configs.push(config),
-            SystemConfigs::Configs(configs) => phase_configs.extend(configs),
+        PhaseNode {
+            phase: self.phase,
+            executor,
+            children: vec![],
         }
     }
-
-    pub fn build(self, world: &mut World) {}
 }
 
 pub struct PhaseNode {
     phase: Box<dyn Phase>,
-    systems: Vec<System>,
+    executor: Box<dyn SystemExecutor>,
     children: Vec<PhaseNode>,
 }
 
+impl PhaseNode {
+    pub fn execute(&self, world: WorldCell) {
+        let ctx = PhaseContext::new(world, self.executor.as_ref());
+        self.phase.run(ctx);
+
+        for child in &self.children {
+            child.execute(world);
+        }
+    }
+}
+
+pub struct Schedule {
+    mode: RunMode,
+    phases: Vec<PhaseConfig>,
+    map: HashMap<&'static str, usize>,
+    dependencies: HashMap<usize, HashSet<usize>>,
+    children: HashMap<usize, HashSet<usize>>,
+}
+
+impl Schedule {
+    pub fn new(mode: RunMode) -> Self {
+        Self {
+            mode,
+            phases: vec![],
+            map: HashMap::new(),
+            dependencies: HashMap::new(),
+            children: HashMap::new(),
+        }
+    }
+
+    pub fn mode(&self) -> RunMode {
+        self.mode
+    }
+
+    pub fn set_mode(&mut self, mode: RunMode) {
+        self.mode = mode;
+    }
+
+    pub fn add_phase(&mut self, phase: impl Phase) -> usize {
+        match self.map.get(phase.name()).copied() {
+            Some(index) => index,
+            None => {
+                let index = self.phases.len();
+                self.map.insert(phase.name(), index);
+                self.phases.push(PhaseConfig::new(phase));
+                index
+            }
+        }
+    }
+
+    pub fn add_sub_phase(&mut self, main: impl Phase, sub: impl Phase) {
+        let main_index = self.add_phase(main);
+        let sub_index = self.add_phase(sub);
+
+        self.children
+            .entry(main_index)
+            .or_default()
+            .insert(sub_index);
+    }
+
+    pub fn run_before(&mut self, phase: impl Phase, target: impl Phase) {
+        let index = self.add_phase(phase);
+        let target_index = self.add_phase(target);
+
+        self.dependencies
+            .entry(target_index)
+            .or_default()
+            .insert(index);
+    }
+
+    pub fn run_after(&mut self, phase: impl Phase, target: impl Phase) {
+        self.run_before(target, phase);
+    }
+
+    pub fn add_systems<M>(&mut self, phase: impl Phase, systems: impl IntoSystemConfigs<M>) {
+        let index = self.add_phase(phase);
+        self.phases[index].add_systems(systems);
+    }
+
+    pub fn build(self, world: &mut World) -> Systems {
+        todo!()
+    }
+}
+
 pub struct Systems {
-    
+    mode: RunMode,
+    phases: HashMap<&'static str, PhaseNode>,
+}
+
+impl Systems {
+    pub fn mode(&self) -> RunMode {
+        self.mode
+    }
+
+    pub fn run(&self, world: &mut World, phase: impl Phase) {
+        if let Some(node) = self.phases.get(phase.name()) {
+            let world = WorldCell::new_mut(world);
+
+            node.execute(world);
+        };
+    }
 }
