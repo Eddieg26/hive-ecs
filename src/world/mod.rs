@@ -34,6 +34,7 @@ pub struct World {
     archetypes: Archetypes,
     resources: Resources,
     entities: Entities,
+    events: EventRegistry,
     frame: Frame,
 }
 
@@ -44,6 +45,7 @@ impl World {
             archetypes: Archetypes::new(),
             resources: Resources::new(),
             entities: Entities::new(),
+            events: EventRegistry::new(),
             frame: Frame(1),
         }
     }
@@ -76,6 +78,10 @@ impl World {
         &self.entities
     }
 
+    pub fn events(&self) -> &EventRegistry {
+        &self.events
+    }
+
     pub fn frame(&self) -> Frame {
         self.frame
     }
@@ -90,6 +96,14 @@ impl World {
 
     pub fn register_non_send_resource<R: Resource>(&mut self) -> ResourceId {
         self.resources.register::<false, R>()
+    }
+
+    pub fn register_event<E: Event>(&mut self) {
+        if !self.resources.contains::<Events<E>>() {
+            self.add_resource(Events::<E>::new());
+        }
+
+        self.events.register::<E>();
     }
 
     pub fn add_resource<R: Resource + Send>(&mut self, resource: R) {
@@ -200,5 +214,6 @@ impl World {
 
     pub fn update(&mut self) {
         self.frame += 1;
+        self.events.update(unsafe { self.cell() });
     }
 }
