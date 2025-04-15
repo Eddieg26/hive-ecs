@@ -440,7 +440,7 @@ pub struct Query<'w, 's, Q: BaseQuery, F: BaseFilter = ()> {
 impl<'w, 's, Q: BaseQuery, F: BaseFilter> Query<'w, 's, Q, F> {
     pub fn new(world: &'w World, state: &'s QueryState<Q, F>) -> Self {
         Self {
-            world: WorldCell::new(world),
+            world: unsafe { WorldCell::new(world) },
             current_frame: world.frame(),
             system_frame: world.frame().previous(),
             state,
@@ -449,7 +449,7 @@ impl<'w, 's, Q: BaseQuery, F: BaseFilter> Query<'w, 's, Q, F> {
 
     pub fn with_frame(world: &'w World, state: &'s QueryState<Q, F>, frame: Frame) -> Self {
         Self {
-            world: WorldCell::new(world),
+            world: unsafe { WorldCell::new(world) },
             current_frame: world.frame(),
             system_frame: frame,
             state,

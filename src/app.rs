@@ -36,7 +36,7 @@ impl AppBuilder {
     }
 
     pub fn build(mut self) -> App {
-        let systems = self.schedule.build(&mut self.world);
+        let systems = self.schedule.build(&mut self.world).unwrap();
 
         App {
             world: self.world,

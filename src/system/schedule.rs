@@ -2,8 +2,11 @@ use super::{
     IntoSystemConfigs, SystemConfig,
     executor::{GraphInfo, RunMode, SystemExecutor},
 };
-use crate::world::{World, WorldCell};
-use std::collections::{HashMap, HashSet};
+use crate::{
+    core::{ImmutableIndexDag, IndexDag},
+    world::{World, WorldCell},
+};
+use std::collections::HashMap;
 
 pub struct PhaseContext<'a> {
     world: WorldCell<'a>,
@@ -37,6 +40,7 @@ pub trait Phase: 'static {
 pub struct PhaseConfig {
     phase: Box<dyn Phase>,
     configs: Vec<SystemConfig>,
+    parent: Option<usize>,
 }
 
 impl PhaseConfig {
@@ -44,11 +48,16 @@ impl PhaseConfig {
         Self {
             phase: Box::new(phase),
             configs: vec![],
+            parent: None,
         }
     }
 
     pub fn add_systems<M>(&mut self, systems: impl IntoSystemConfigs<M>) {
         self.configs.extend(systems.configs().flatten());
+    }
+
+    pub fn set_parent(&mut self, index: usize) {
+        self.parent = Some(index)
     }
 
     pub fn build(self, world: &mut World, mode: RunMode) -> PhaseNode {
@@ -58,7 +67,6 @@ impl PhaseConfig {
         PhaseNode {
             phase: self.phase,
             executor,
-            children: vec![],
         }
     }
 }
@@ -66,36 +74,29 @@ impl PhaseConfig {
 pub struct PhaseNode {
     phase: Box<dyn Phase>,
     executor: Box<dyn SystemExecutor>,
-    children: Vec<PhaseNode>,
 }
 
 impl PhaseNode {
-    pub fn execute(&self, world: WorldCell) {
+    pub fn run(&self, world: WorldCell) {
         let ctx = PhaseContext::new(world, self.executor.as_ref());
         self.phase.run(ctx);
-
-        for child in &self.children {
-            child.execute(world);
-        }
     }
 }
 
 pub struct Schedule {
     mode: RunMode,
-    phases: Vec<PhaseConfig>,
+    phases: IndexDag<PhaseConfig>,
+    hierarchy: IndexDag<usize>,
     map: HashMap<&'static str, usize>,
-    dependencies: HashMap<usize, HashSet<usize>>,
-    children: HashMap<usize, HashSet<usize>>,
 }
 
 impl Schedule {
     pub fn new(mode: RunMode) -> Self {
         Self {
             mode,
-            phases: vec![],
+            phases: IndexDag::new(),
+            hierarchy: IndexDag::new(),
             map: HashMap::new(),
-            dependencies: HashMap::new(),
-            children: HashMap::new(),
         }
     }
 
@@ -111,9 +112,11 @@ impl Schedule {
         match self.map.get(phase.name()).copied() {
             Some(index) => index,
             None => {
-                let index = self.phases.len();
-                self.map.insert(phase.name(), index);
-                self.phases.push(PhaseConfig::new(phase));
+                let config = PhaseConfig::new(phase);
+                let index = self.phases.add_node(config);
+                self.map
+                    .insert(self.phases.nodes()[index].phase.name(), index);
+                self.hierarchy.add_node(index);
                 index
             }
         }
@@ -123,20 +126,23 @@ impl Schedule {
         let main_index = self.add_phase(main);
         let sub_index = self.add_phase(sub);
 
-        self.children
-            .entry(main_index)
-            .or_default()
-            .insert(sub_index);
+        self.hierarchy.add_dependency(main_index, sub_index);
     }
 
     pub fn run_before(&mut self, phase: impl Phase, target: impl Phase) {
         let index = self.add_phase(phase);
         let target_index = self.add_phase(target);
 
-        self.dependencies
-            .entry(target_index)
-            .or_default()
-            .insert(index);
+        self.phases.add_dependency(index, target_index);
+
+        if let Some(old_parent) = self.phases.nodes()[index].parent {
+            self.hierarchy.remove_dependency(old_parent, index);
+        }
+
+        self.phases.nodes_mut()[index].parent = self.phases.nodes()[target_index].parent;
+        if let Some(parent) = self.phases.nodes()[index].parent {
+            self.hierarchy.add_dependency(parent, index);
+        }
     }
 
     pub fn run_after(&mut self, phase: impl Phase, target: impl Phase) {
@@ -145,17 +151,67 @@ impl Schedule {
 
     pub fn add_systems<M>(&mut self, phase: impl Phase, systems: impl IntoSystemConfigs<M>) {
         let index = self.add_phase(phase);
-        self.phases[index].add_systems(systems);
+        self.phases.nodes_mut()[index].add_systems(systems);
     }
 
-    pub fn build(self, world: &mut World) -> Systems {
-        todo!()
+    pub fn build(self, world: &mut World) -> Result<Systems, ScheduleBuildError> {
+        let mode = self.mode;
+        let mut hierarchy = self.hierarchy;
+        let mut phases = self.phases.map(|config| config.build(world, mode));
+
+        if let Err(error) = hierarchy.build() {
+            let names = error
+                .0
+                .iter()
+                .map(|index| phases.nodes()[*index].phase.name())
+                .collect();
+            return Err(ScheduleBuildError::CyclicHierarchy(names));
+        }
+
+        if let Err(error) = phases.build() {
+            let names = error
+                .0
+                .iter()
+                .map(|index| phases.nodes()[*index].phase.name())
+                .collect();
+            return Err(ScheduleBuildError::CyclicHierarchy(names));
+        }
+
+        let systems = Systems {
+            mode,
+            phases: phases.into_immutable(),
+            hierarchy: hierarchy.into_immutable(),
+            map: self.map,
+        };
+
+        Ok(systems)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScheduleBuildError {
+    CyclicDependency(Vec<&'static str>),
+    CyclicHierarchy(Vec<&'static str>),
+}
+
+impl std::fmt::Display for ScheduleBuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ScheduleBuildError::CyclicDependency(names) => {
+                write!(f, "Cyclic dependency detected: {:?}", names)
+            }
+            ScheduleBuildError::CyclicHierarchy(names) => {
+                write!(f, "Cyclic hierarchy detected: {:?}", names)
+            }
+        }
     }
 }
 
 pub struct Systems {
     mode: RunMode,
-    phases: HashMap<&'static str, PhaseNode>,
+    phases: ImmutableIndexDag<PhaseNode>,
+    hierarchy: ImmutableIndexDag<usize>,
+    map: HashMap<&'static str, usize>,
 }
 
 impl Systems {
@@ -164,10 +220,14 @@ impl Systems {
     }
 
     pub fn run(&self, world: &mut World, phase: impl Phase) {
-        if let Some(node) = self.phases.get(phase.name()) {
-            let world = WorldCell::new_mut(world);
+        if let Some(index) = self.map.get(phase.name()).copied() {
+            let world = unsafe { WorldCell::new_mut(world) };
 
-            node.execute(world);
-        };
+            let mut stack = vec![index];
+            while let Some(index) = stack.pop() {
+                self.phases.nodes()[index].run(world);
+                stack.extend(self.hierarchy.dependents()[index].ones());
+            }
+        }
     }
 }

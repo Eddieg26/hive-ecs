@@ -4,11 +4,11 @@ use std::marker::PhantomData;
 #[derive(Clone, Copy)]
 pub struct WorldCell<'w>(*mut World, PhantomData<&'w mut World>);
 impl<'w> WorldCell<'w> {
-    pub(crate) fn new(world: &World) -> Self {
+    pub(crate) unsafe fn new(world: &World) -> Self {
         WorldCell(std::ptr::from_ref(world).cast_mut(), PhantomData)
     }
 
-    pub fn new_mut(world: &mut World) -> Self {
+    pub(crate) unsafe fn new_mut(world: &mut World) -> Self {
         WorldCell(std::ptr::from_mut(world), PhantomData)
     }
 
