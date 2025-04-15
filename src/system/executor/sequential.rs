@@ -1,5 +1,8 @@
-use super::{GraphInfo, SystemExecutor};
-use crate::system::System;
+use super::SystemExecutor;
+use crate::{
+    core::{DagValues, IndexDag},
+    system::System,
+};
 
 pub struct SequentialExecutor {
     systems: Box<[System]>,
@@ -7,40 +10,14 @@ pub struct SequentialExecutor {
 }
 
 impl SequentialExecutor {
-    pub fn new(info: GraphInfo) -> Self {
-        let GraphInfo {
-            mut nodes,
-            dependents,
-            mut dependencies,
-        } = info;
-
-        let mut order = vec![];
-        let mut stack = vec![];
-
-        for (index, &dep_count) in dependencies.iter().enumerate() {
-            if dep_count == 0 {
-                stack.push(index);
-            }
-        }
-
-        while let Some(node_index) = stack.pop() {
-            order.push(node_index);
-
-            for dependent in dependents[node_index].ones() {
-                dependencies[dependent] -= 1;
-                if dependencies[dependent] == 0 {
-                    stack.push(dependent);
-                }
-            }
-        }
-
-        if order.len() != nodes.len() {
-            panic!("Cyclic dependency detected in the system graph!");
-        }
+    pub fn new(systems: IndexDag<System>) -> Self {
+        let DagValues {
+            nodes, topology, ..
+        } = systems.into_values();
 
         Self {
-            systems: nodes.drain(..).map(System::from).collect(),
-            order: order.into_boxed_slice(),
+            systems: nodes.into_boxed_slice(),
+            order: topology.into_boxed_slice(),
         }
     }
 }

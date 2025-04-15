@@ -73,13 +73,8 @@ impl<N> IndexDag<N> {
         }
     }
 
-    pub fn map<M>(mut self, mut mapper: impl FnMut(usize, N) -> M) -> IndexDag<M> {
-        let nodes = self
-            .nodes
-            .drain(..)
-            .enumerate()
-            .map(|(i, n)| mapper(i, n))
-            .collect();
+    pub fn map<M>(mut self, mut mapper: impl FnMut(N) -> M) -> IndexDag<M> {
+        let nodes = self.nodes.drain(..).map(|n| mapper(n)).collect();
 
         IndexDag {
             nodes,
@@ -158,6 +153,22 @@ impl<N> IndexDag<N> {
             topology: self.topology.into_boxed_slice(),
         }
     }
+
+    pub fn into_values(self) -> DagValues<N> {
+        DagValues {
+            nodes: self.nodes,
+            dependents: self.dependents,
+            dependencies: self.dependencies,
+            topology: self.topology,
+        }
+    }
+}
+
+pub struct DagValues<N> {
+    pub nodes: Vec<N>,
+    pub dependents: Vec<FixedBitSet>,
+    pub dependencies: Vec<usize>,
+    pub topology: Vec<usize>,
 }
 
 pub struct ImmutableIndexDag<N> {
@@ -186,6 +197,10 @@ impl<N> ImmutableIndexDag<N> {
 
     pub fn topology(&self) -> &[usize] {
         &self.topology
+    }
+
+    pub fn len(&self) -> usize {
+        self.nodes.len()
     }
 }
 

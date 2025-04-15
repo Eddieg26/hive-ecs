@@ -1,6 +1,6 @@
 use super::{
-    IntoSystemConfigs, SystemConfig,
-    executor::{GraphInfo, RunMode, SystemExecutor},
+    IntoSystemConfigs, System, SystemConfig,
+    executor::{RunMode, SystemExecutor},
 };
 use crate::{
     core::{ImmutableIndexDag, IndexDag},
@@ -61,8 +61,42 @@ impl PhaseConfig {
     }
 
     pub fn build(self, world: &mut World, mode: RunMode) -> PhaseNode {
-        let info = GraphInfo::new(world, self.configs);
-        let executor = mode.create_executor(info);
+        let mut systems = IndexDag::new();
+        for config in self.configs {
+            systems.add_node(config.into_system_node(world));
+        }
+
+        for index in (0..systems.nodes().len()).rev() {
+            for dep_index in (0..systems.nodes().len()).take(index) {
+                if systems.nodes()[index].has_dependency(&systems.nodes()[dep_index]) {
+                    systems.add_dependency(dep_index, index);
+                }
+            }
+        }
+
+        if let Err(error) = systems.build() {
+            let systems = error
+                .0
+                .iter()
+                .map(|i| {
+                    systems.nodes()[*i]
+                        .system
+                        .meta
+                        .name
+                        .clone()
+                        .unwrap_or("unknown".into())
+                })
+                .collect::<Vec<_>>();
+
+            let phase = self.phase.name();
+
+            panic!(
+                "Cyclic dependency detected in phase {}: {:?}",
+                phase, systems
+            );
+        }
+
+        let executor = mode.create_executor(systems.map(System::from));
 
         PhaseNode {
             phase: self.phase,
@@ -185,7 +219,7 @@ impl Schedule {
             }
         }
 
-        let phases = phases.map(|_, config| config.build(world, mode));
+        let phases = phases.map(|config| config.build(world, mode));
 
         Ok(Systems {
             mode,
@@ -245,7 +279,13 @@ impl Systems {
 }
 
 mod tests {
-    use crate::{system::{executor::RunMode, schedule::{Schedule, ScheduleBuildError}}, world::World};
+    use crate::{
+        system::{
+            executor::RunMode,
+            schedule::{Schedule, ScheduleBuildError},
+        },
+        world::World,
+    };
 
     #[derive(Clone, Copy, PartialEq, Eq)]
     struct TestPhase(&'static str);

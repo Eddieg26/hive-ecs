@@ -1,5 +1,5 @@
-use super::{SystemConfig, SystemNode};
-use crate::world::{World, WorldCell};
+use super::{System, SystemConfig, SystemNode};
+use crate::{core::IndexDag, world::{World, WorldCell}};
 
 pub mod parallel;
 pub mod sequential;
@@ -19,10 +19,10 @@ pub enum RunMode {
 }
 
 impl RunMode {
-    pub fn create_executor(&self, info: GraphInfo) -> Box<dyn SystemExecutor> {
+    pub fn create_executor(&self, systems: IndexDag<System>) -> Box<dyn SystemExecutor> {
         match self {
-            RunMode::Sequential => Box::new(SequentialExecutor::new(info)),
-            RunMode::Parallel => Box::new(ParallelExecutor::new(info)),
+            RunMode::Sequential => Box::new(SequentialExecutor::new(systems)),
+            RunMode::Parallel => Box::new(ParallelExecutor::new(systems)),
         }
     }
 }

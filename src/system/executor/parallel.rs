@@ -1,5 +1,9 @@
-use super::{GraphInfo, SystemExecutor};
-use crate::{system::System, world::WorldCell};
+use super::SystemExecutor;
+use crate::{
+    core::{ImmutableIndexDag, IndexDag},
+    system::System,
+    world::WorldCell,
+};
 use fixedbitset::FixedBitSet;
 use std::{
     sync::{
@@ -11,36 +15,28 @@ use std::{
 
 pub struct ParallelExecutor {
     state: Arc<Mutex<ExecutionState>>,
-    dependents: Box<[FixedBitSet]>,
-    dependencies: Box<[usize]>,
-    systems: Box<[System]>,
+    systems: ImmutableIndexDag<System>,
     initial_systems: FixedBitSet,
 }
 
 impl ParallelExecutor {
-    pub fn new(info: GraphInfo) -> Self {
-        let GraphInfo {
-            mut nodes,
-            dependents,
-            dependencies,
-        } = info;
+    pub fn new(systems: IndexDag<System>) -> Self {
+        let systems = systems.into_immutable();
 
-        let mut initial_systems = FixedBitSet::with_capacity(nodes.len());
-        for (index, deps) in dependencies.iter().enumerate() {
+        let mut initial_systems = FixedBitSet::with_capacity(systems.len());
+        for (index, deps) in systems.dependencies().iter().enumerate() {
             initial_systems.set(index, *deps == 0);
         }
 
         let state = ExecutionState {
-            dependencies: dependencies.clone(),
+            dependencies: systems.dependencies().to_vec(),
             queue: initial_systems.clone(),
-            completed: FixedBitSet::with_capacity(nodes.len()),
+            completed: FixedBitSet::with_capacity(systems.len()),
         };
 
         Self {
             state: Arc::new(Mutex::new(state)),
-            dependents: dependents.into_boxed_slice(),
-            dependencies: dependencies.into_boxed_slice(),
-            systems: nodes.drain(..).map(System::from).collect(),
+            systems,
             initial_systems,
         }
     }
@@ -49,7 +45,7 @@ impl ParallelExecutor {
         let mut state = self.state.lock().unwrap();
         state.completed.clear();
         state.queue = self.initial_systems.clone();
-        state.dependencies = self.dependencies.to_vec();
+        state.dependencies = self.systems.dependencies().to_vec();
     }
 }
 
@@ -61,7 +57,6 @@ impl SystemExecutor for ParallelExecutor {
             let ctx = Arc::new(ExecutionContext::new(
                 world,
                 &self.systems,
-                &self.dependents,
                 scope,
                 &sender,
                 self.state.clone(),
@@ -104,8 +99,7 @@ pub enum ExecutionResult {
 
 pub struct ExecutionContext<'scope, 'env: 'scope> {
     world: WorldCell<'scope>,
-    systems: &'scope [System],
-    dependents: &'scope [FixedBitSet],
+    systems: &'scope ImmutableIndexDag<System>,
     scope: &'scope Scope<'scope, 'env>,
     sender: &'env Sender<ExecutionResult>,
     state: Arc<Mutex<ExecutionState>>,
@@ -114,8 +108,7 @@ pub struct ExecutionContext<'scope, 'env: 'scope> {
 impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
     pub fn new(
         world: WorldCell<'scope>,
-        systems: &'scope [System],
-        dependents: &'scope [FixedBitSet],
+        systems: &'scope ImmutableIndexDag<System>,
         scope: &'scope Scope<'scope, 'env>,
         sender: &'env Sender<ExecutionResult>,
         state: Arc<Mutex<ExecutionState>>,
@@ -123,7 +116,6 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
         Self {
             world,
             systems,
-            dependents,
             scope,
             sender,
             state,
@@ -138,7 +130,6 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
     fn scoped(&self) -> Self {
         let world = self.world;
         let systems = self.systems;
-        let dependents = self.dependents;
         let scope = self.scope;
         let sender = self.sender;
         let state = self.state.clone();
@@ -146,7 +137,6 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
         Self {
             world,
             systems,
-            dependents,
             scope,
             sender,
             state,
@@ -170,7 +160,7 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
 
         for index in state.queue.clone().into_ones() {
             state.queue.set(index, false);
-            if self.systems[index].meta.send {
+            if self.systems.nodes()[index].meta.send {
                 self.spawn(index);
             } else {
                 self.spawn_non_send(index);
@@ -179,7 +169,7 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
     }
 
     fn run_system(&self, index: usize) {
-        self.systems[index].run(self.world);
+        self.systems.nodes()[index].run(self.world);
         self.system_done(index);
     }
 
@@ -188,7 +178,7 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
 
         state.completed.set(index, true);
 
-        for dependent in self.dependents[index].ones() {
+        for dependent in self.systems.dependents()[index].ones() {
             state.dependencies[dependent] -= 1;
             if state.dependencies[dependent] == 0 {
                 state.queue.set(dependent, true);
