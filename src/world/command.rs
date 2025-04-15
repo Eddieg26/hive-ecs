@@ -1,58 +1,86 @@
-use crate::system::arg::SystemArg;
 use super::{Component, Entity, Row, World};
+use crate::system::arg::SystemArg;
 
-pub trait Command: Send + Sync + 'static {
+pub trait Command: Sized + Send + Sync + 'static {
     fn execute(self, world: &mut World);
 }
 
-pub struct BoxCommand(Box<dyn FnOnce(&mut World) + Send + Sync + 'static>);
-impl BoxCommand {
-    pub fn new<C: Command>(command: C) -> Self {
-        BoxCommand(Box::new(move |world| command.execute(world)))
-    }
+pub type ExecuteCommand = fn(&[u8], &mut World) -> usize;
 
-    pub fn execute(self, world: &mut World) {
-        (self.0)(world)
-    }
+pub struct CommandBuffer {
+    buffer: Vec<u8>,
 }
 
-#[derive(Default)]
-pub struct Commands(Vec<BoxCommand>);
-
-impl Commands {
+impl CommandBuffer {
     pub fn new() -> Self {
-        Commands(Vec::new())
+        Self { buffer: vec![] }
     }
 
     pub fn add<C: Command>(&mut self, command: C) {
-        self.0.push(BoxCommand::new(command));
+        #[repr(C, packed)]
+        struct RawCommand<C: Command> {
+            execute: ExecuteCommand,
+            command: C,
+        }
+
+        impl<C: Command> RawCommand<C> {
+            pub fn new(command: C) -> Self {
+                Self {
+                    execute: |bytes, world| {
+                        let command = unsafe { std::ptr::read::<C>(bytes.as_ptr() as *const C) };
+                        command.execute(world);
+
+                        std::mem::size_of::<C>()
+                    },
+                    command,
+                }
+            }
+        }
+
+        unsafe {
+            let offset = self.buffer.len();
+            self.buffer.reserve(std::mem::size_of::<RawCommand<C>>());
+
+            let ptr = self.buffer.as_mut_ptr().add(offset);
+
+            ptr.cast::<RawCommand<C>>()
+                .write_unaligned(RawCommand::new(command));
+
+            self.buffer
+                .set_len(offset + std::mem::size_of::<RawCommand<C>>());
+        };
     }
 
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
+    pub fn execute(&mut self, world: &mut World) {
+        let mut start = 0;
 
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
+        while start < self.buffer.len() {
+            let executor = unsafe {
+                self.buffer[start..start + std::mem::size_of::<ExecuteCommand>()]
+                    .as_ptr()
+                    .cast::<ExecuteCommand>()
+                    .as_ref()
+                    .unwrap_unchecked()
+            };
 
-    pub fn clear(&mut self) {
-        self.0.clear();
-    }
+            start += std::mem::size_of::<ExecuteCommand>();
 
-    pub fn drain(&mut self) -> Vec<BoxCommand> {
-        std::mem::take(&mut self.0)
+            let command = &self.buffer[start..];
+            start += executor(command, world);
+        }
+
+        self.buffer.clear();
     }
 }
 
-pub struct CommandBuffer<'world, 'state> {
-    commands: &'state mut Commands,
+pub struct Commands<'world, 'state> {
+    commands: &'state mut CommandBuffer,
     _marker: std::marker::PhantomData<&'world ()>,
 }
 
-impl<'world, 'state> CommandBuffer<'world, 'state> {
-    pub fn new(commands: &'state mut Commands) -> Self {
-        CommandBuffer {
+impl<'world, 'state> Commands<'world, 'state> {
+    pub fn new(commands: &'state mut CommandBuffer) -> Self {
+        Commands {
             commands,
             _marker: std::marker::PhantomData,
         }
@@ -63,19 +91,17 @@ impl<'world, 'state> CommandBuffer<'world, 'state> {
     }
 }
 
-unsafe impl SystemArg for CommandBuffer<'_, '_> {
-    type Item<'world, 'state> = CommandBuffer<'world, 'state>;
+unsafe impl SystemArg for Commands<'_, '_> {
+    type Item<'world, 'state> = Commands<'world, 'state>;
 
-    type State = Commands;
+    type State = CommandBuffer;
 
     fn init(_: &mut World) -> Self::State {
-        Commands::new()
+        CommandBuffer::new()
     }
 
     fn apply(state: &mut Self::State, world: &mut World) {
-        for command in state.drain() {
-            command.execute(world);
-        }
+        state.execute(world);
     }
 
     unsafe fn get<'world, 'state>(
@@ -83,7 +109,7 @@ unsafe impl SystemArg for CommandBuffer<'_, '_> {
         _: super::WorldCell<'world>,
         _: &crate::system::SystemMeta,
     ) -> Self::Item<'world, 'state> {
-        CommandBuffer::new(state)
+        Commands::new(state)
     }
 }
 
