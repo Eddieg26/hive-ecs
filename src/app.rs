@@ -80,15 +80,22 @@ impl AppBuilder {
         self
     }
 
-    pub fn build(mut self) -> App {
-        let systems = self.schedule.build(&mut self.world).unwrap();
+    pub fn build(&mut self) -> App {
+        let app = std::mem::take(self);
+        let systems = app.schedule.build(&mut self.world).unwrap();
         let send = self.world.resources().send();
 
         App {
-            world: self.world,
+            world: app.world,
             systems,
             send,
         }
+    }
+}
+
+impl Default for AppBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -115,8 +122,9 @@ impl App {
         &self.systems
     }
 
-    pub fn run(&mut self, phase: impl Phase) {
+    pub fn run(&mut self, phase: impl Phase) -> &mut Self {
         self.systems.run(&mut self.world, phase);
         self.world.update();
+        self
     }
 }

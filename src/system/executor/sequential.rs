@@ -1,16 +1,16 @@
 use super::SystemExecutor;
 use crate::{
     core::{DagValues, IndexDag},
-    system::System,
+    system::SystemCell,
 };
 
 pub struct SequentialExecutor {
-    systems: Box<[System]>,
+    systems: Box<[SystemCell]>,
     order: Box<[usize]>,
 }
 
 impl SequentialExecutor {
-    pub fn new(systems: IndexDag<System>) -> Self {
+    pub fn new(systems: IndexDag<SystemCell>) -> Self {
         let DagValues {
             nodes, topology, ..
         } = systems.into_values();
@@ -26,7 +26,7 @@ impl SystemExecutor for SequentialExecutor {
     fn execute(&self, world: crate::world::WorldCell) {
         for index in &self.order {
             let system = &self.systems[*index];
-            system.run(world);
+            unsafe { system.cast_mut().run(world) };
         }
     }
 }

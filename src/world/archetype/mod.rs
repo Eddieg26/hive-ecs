@@ -87,7 +87,7 @@ impl Archetypes {
 
     pub fn register<C: Component>(&mut self) -> ComponentId {
         let id = self.components.register::<C>();
-        self.bitset.grow(1);
+        self.bitset.grow(id.to_usize() + 1);
         id
     }
 

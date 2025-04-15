@@ -19,7 +19,7 @@ pub unsafe trait SystemArg: Sized {
     }
 
     unsafe fn get<'world, 'state>(
-        state: &'state Self::State,
+        state: &'state mut Self::State,
         world: WorldCell<'world>,
         system: &SystemMeta,
     ) -> Self::Item<'world, 'state>;
@@ -49,7 +49,7 @@ unsafe impl SystemArg for () {
     }
 
     unsafe fn get<'world, 'state>(
-        _state: &'state Self::State,
+        _state: &'state mut Self::State,
         _world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
@@ -67,7 +67,7 @@ unsafe impl SystemArg for &World {
     }
 
     unsafe fn get<'world, 'state>(
-        _state: &'state Self::State,
+        _state: &'state mut Self::State,
         world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
@@ -89,7 +89,7 @@ unsafe impl SystemArg for &Entities {
     }
 
     unsafe fn get<'world, 'state>(
-        _state: &'state Self::State,
+        _state: &'state mut Self::State,
         world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
@@ -107,7 +107,7 @@ unsafe impl<R: Resource + Send> SystemArg for &R {
     }
 
     unsafe fn get<'world, 'state>(
-        _state: &'state Self::State,
+        _state: &'state mut Self::State,
         world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
@@ -129,7 +129,7 @@ unsafe impl<R: Resource + Send> SystemArg for &mut R {
     }
 
     unsafe fn get<'world, 'state>(
-        _state: &'state Self::State,
+        _state: &'state mut Self::State,
         mut world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
@@ -151,7 +151,7 @@ unsafe impl<R: Resource> SystemArg for NonSend<'_, R> {
     }
 
     unsafe fn get<'world, 'state>(
-        _state: &'state Self::State,
+        _state: &'state mut Self::State,
         world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
@@ -179,7 +179,7 @@ unsafe impl<R: Resource> SystemArg for NonSendMut<'_, R> {
     }
 
     unsafe fn get<'world, 'state>(
-        _state: &'state Self::State,
+        _state: &'state mut Self::State,
         mut world: WorldCell<'world>,
         _system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
@@ -211,7 +211,7 @@ unsafe impl<A: SystemArg> SystemArg for Option<A> {
     }
 
     unsafe fn get<'world, 'state>(
-        state: &'state Self::State,
+        state: &'state mut Self::State,
         world: WorldCell<'world>,
         system: &SystemMeta,
     ) -> Self::Item<'world, 'state> {
@@ -250,8 +250,8 @@ macro_rules! impl_into_system_configs {
                     Box::new(state) as Box<dyn Any + Send + Sync>
                 };
 
-                let execute = move |state: &Box<dyn Any + Send + Sync>, world: WorldCell, system: &SystemMeta| {
-                    let ($($arg,)*) = state.downcast_ref::<($($arg::State,)*)>().unwrap();
+                let execute = move |state: &mut Box<dyn Any + Send + Sync>, world: WorldCell, system: &SystemMeta| {
+                    let ($($arg,)*) = state.downcast_mut::<($($arg::State,)*)>().unwrap();
                     let ($($arg,)*) = unsafe {($($arg::get($arg, world, system),)*)};
 
                     self($($arg,)*);
@@ -315,7 +315,7 @@ macro_rules! impl_into_system_configs {
                 ($($arg,)*)
             }
 
-            unsafe fn get<'world, 'state>(state: &'state Self::State, world: WorldCell<'world>, system: &SystemMeta,) -> Self::Item<'world, 'state> {
+            unsafe fn get<'world, 'state>(state: &'state mut Self::State, world: WorldCell<'world>, system: &SystemMeta,) -> Self::Item<'world, 'state> {
                 let ($($arg,)*) = state;
                 let ($($arg,)*) = unsafe {($($arg::get($arg, world, system),)*)};
                 ($($arg,)*)

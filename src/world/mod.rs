@@ -145,6 +145,10 @@ impl World {
     pub fn remove_resource<R: Resource>(&mut self) -> Option<R> {
         self.resources.remove::<R>()
     }
+
+    pub unsafe fn cell(&self) -> WorldCell {
+        unsafe { WorldCell::new(self) }
+    }
 }
 
 impl World {

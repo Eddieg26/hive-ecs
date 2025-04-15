@@ -1,4 +1,4 @@
-use super::System;
+use super::{System, SystemCell};
 use crate::{core::IndexDag, world::WorldCell};
 
 pub mod parallel;
@@ -18,7 +18,7 @@ pub enum RunMode {
 }
 
 impl RunMode {
-    pub fn create_executor(&self, systems: IndexDag<System>) -> Box<dyn SystemExecutor> {
+    pub fn create_executor(&self, systems: IndexDag<SystemCell>) -> Box<dyn SystemExecutor> {
         match self {
             RunMode::Sequential => Box::new(SequentialExecutor::new(systems)),
             RunMode::Parallel => Box::new(ParallelExecutor::new(systems)),

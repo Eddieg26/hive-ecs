@@ -1,5 +1,5 @@
 use super::{
-    IntoSystemConfigs, System, SystemConfig,
+    IntoSystemConfigs, SystemCell, SystemConfig,
     executor::{RunMode, SystemExecutor},
 };
 use crate::{
@@ -96,7 +96,7 @@ impl PhaseConfig {
             );
         }
 
-        let executor = mode.create_executor(systems.map(System::from));
+        let executor = mode.create_executor(systems.map(SystemCell::from));
 
         PhaseNode {
             phase: self.phase,

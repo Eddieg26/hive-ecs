@@ -471,7 +471,7 @@ unsafe impl<Q: BaseQuery + 'static, F: BaseFilter + 'static> SystemArg for Query
     }
 
     unsafe fn get<'world, 'state>(
-        state: &'state Self::State,
+        state: &'state mut Self::State,
         world: WorldCell<'world>,
         system: &super::SystemMeta,
     ) -> Self::Item<'world, 'state> {

@@ -2,7 +2,7 @@ use crate::{
     core::{AccessBitset, Frame, SparseIndex},
     world::{ComponentId, ResourceId, World, cell::WorldCell},
 };
-use std::{any::Any, borrow::Cow, collections::HashSet};
+use std::{any::Any, borrow::Cow, cell::UnsafeCell, collections::HashSet};
 
 pub mod arg;
 pub mod executor;
@@ -232,8 +232,30 @@ impl IntoSystemConfigs<()> for SystemConfigs {
     }
 }
 
+impl<F: Fn() + Send + Sync + 'static> IntoSystemConfigs<()> for F {
+    fn configs(self) -> SystemConfigs {
+        SystemConfigs::Config(SystemConfig {
+            id: SystemId::new(),
+            name: None,
+            exclusive: false,
+            send: true,
+            dependencies: HashSet::new(),
+            init: |_| Box::new(()),
+            access: |_| vec![],
+            execute: Box::new(move |_, _, _| {
+                self();
+            }),
+        })
+    }
+
+    fn before<Marker>(self, configs: impl IntoSystemConfigs<Marker>) -> SystemConfigs {
+        self.configs().before(configs)
+    }
+}
+
 pub type SystemState = Box<dyn Any + Send + Sync>;
-pub type SystemRun = Box<dyn Fn(&Box<dyn Any + Send + Sync>, WorldCell, &SystemMeta) + Send + Sync>;
+pub type SystemRun =
+    Box<dyn Fn(&mut Box<dyn Any + Send + Sync>, WorldCell, &SystemMeta) + Send + Sync>;
 
 pub struct System {
     meta: SystemMeta,
@@ -246,8 +268,8 @@ impl System {
         Self { meta, state, run }
     }
 
-    pub fn run(&self, world: WorldCell) {
-        (self.run)(&self.state, world, &self.meta);
+    pub fn run(&mut self, world: WorldCell) {
+        (self.run)(&mut self.state, world, &self.meta);
     }
 }
 
@@ -256,3 +278,35 @@ impl From<SystemNode> for System {
         value.system
     }
 }
+
+pub struct SystemCell(UnsafeCell<System>);
+
+impl From<System> for SystemCell {
+    fn from(system: System) -> Self {
+        Self(UnsafeCell::new(system))
+    }
+}
+
+impl From<SystemNode> for SystemCell {
+    fn from(node: SystemNode) -> Self {
+        Self(UnsafeCell::new(node.system))
+    }
+}
+
+impl SystemCell {
+    pub fn get(&self) -> &System {
+        unsafe { self.0.get().as_ref().unwrap() }
+    }
+
+    pub fn get_mut(&mut self) -> &mut System {
+        self.0.get_mut()
+    }
+
+    /// The caller must ensure that the system is not borrowed elsewhere.
+    pub unsafe fn cast_mut(&self) -> &mut System {
+        unsafe { &mut *self.0.get() }
+    }
+}
+
+unsafe impl Send for SystemCell {}
+unsafe impl Sync for SystemCell {}

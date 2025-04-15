@@ -1,7 +1,7 @@
 use super::SystemExecutor;
 use crate::{
     core::{ImmutableIndexDag, IndexDag},
-    system::System,
+    system::{System, SystemCell},
     world::WorldCell,
 };
 use fixedbitset::FixedBitSet;
@@ -15,12 +15,12 @@ use std::{
 
 pub struct ParallelExecutor {
     state: Arc<Mutex<ExecutionState>>,
-    systems: ImmutableIndexDag<System>,
+    systems: ImmutableIndexDag<SystemCell>,
     initial_systems: FixedBitSet,
 }
 
 impl ParallelExecutor {
-    pub fn new(systems: IndexDag<System>) -> Self {
+    pub fn new(systems: IndexDag<SystemCell>) -> Self {
         let systems = systems.into_immutable();
 
         let mut initial_systems = FixedBitSet::with_capacity(systems.len());
@@ -99,7 +99,7 @@ pub enum ExecutionResult {
 
 pub struct ExecutionContext<'scope, 'env: 'scope> {
     world: WorldCell<'scope>,
-    systems: &'scope ImmutableIndexDag<System>,
+    systems: &'scope ImmutableIndexDag<SystemCell>,
     scope: &'scope Scope<'scope, 'env>,
     sender: &'env Sender<ExecutionResult>,
     state: Arc<Mutex<ExecutionState>>,
@@ -108,7 +108,7 @@ pub struct ExecutionContext<'scope, 'env: 'scope> {
 impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
     pub fn new(
         world: WorldCell<'scope>,
-        systems: &'scope ImmutableIndexDag<System>,
+        systems: &'scope ImmutableIndexDag<SystemCell>,
         scope: &'scope Scope<'scope, 'env>,
         sender: &'env Sender<ExecutionResult>,
         state: Arc<Mutex<ExecutionState>>,
@@ -160,7 +160,7 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
 
         for index in state.queue.clone().into_ones() {
             state.queue.set(index, false);
-            if self.systems.nodes()[index].meta.send {
+            if self.systems.nodes()[index].get().meta.send {
                 self.spawn(index);
             } else {
                 self.spawn_non_send(index);
@@ -169,7 +169,7 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
     }
 
     fn run_system(&self, index: usize) {
-        self.systems.nodes()[index].run(self.world);
+        unsafe { self.systems.nodes()[index].cast_mut().run(self.world) };
         self.system_done(index);
     }
 
