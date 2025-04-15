@@ -71,8 +71,8 @@ where
     }
 
     pub fn reserve(&mut self, index: I) {
-        if index.to_usize() > self.values.len() {
-            self.values.resize_with(index.to_usize(), || None);
+        if index.to_usize() >= self.values.len() {
+            self.values.resize_with(index.to_usize() + 1, || None);
         }
     }
 
