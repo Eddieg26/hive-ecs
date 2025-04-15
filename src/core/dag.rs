@@ -73,8 +73,13 @@ impl<N> IndexDag<N> {
         }
     }
 
-    pub fn map<M>(mut self, mut mapper: impl FnMut(N) -> M) -> IndexDag<M> {
-        let nodes = self.nodes.drain(..).map(|n| mapper(n)).collect();
+    pub fn map<M>(mut self, mut mapper: impl FnMut(usize, N) -> M) -> IndexDag<M> {
+        let nodes = self
+            .nodes
+            .drain(..)
+            .enumerate()
+            .map(|(i, n)| mapper(i, n))
+            .collect();
 
         IndexDag {
             nodes,
@@ -225,13 +230,13 @@ mod tests {
         let node2 = dag.add_node("Node2");
         let node3 = dag.add_node("Node3");
 
-        dag.add_dependency(node1, node2); // Node2 depends on Node1
         dag.add_dependency(node2, node3); // Node3 depends on Node2
+        dag.add_dependency(node2, node1); // Node1 depends on Node2
 
         let result = dag.build();
         assert!(result.is_ok());
         let topology = result.unwrap();
-        assert_eq!(topology, &[node1, node2, node3]);
+        assert_eq!(topology, &[node2, node3, node1]);
     }
 
     #[test]

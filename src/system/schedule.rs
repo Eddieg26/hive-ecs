@@ -127,6 +127,7 @@ impl Schedule {
         let sub_index = self.add_phase(sub);
 
         self.hierarchy.add_dependency(main_index, sub_index);
+        self.phases.nodes_mut()[sub_index].parent = Some(main_index);
     }
 
     pub fn run_before(&mut self, phase: impl Phase, target: impl Phase) {
@@ -157,7 +158,7 @@ impl Schedule {
     pub fn build(self, world: &mut World) -> Result<Systems, ScheduleBuildError> {
         let mode = self.mode;
         let mut hierarchy = self.hierarchy;
-        let mut phases = self.phases.map(|config| config.build(world, mode));
+        let mut phases = self.phases;
 
         if let Err(error) = hierarchy.build() {
             let names = error
@@ -174,17 +175,24 @@ impl Schedule {
                 .iter()
                 .map(|index| phases.nodes()[*index].phase.name())
                 .collect();
-            return Err(ScheduleBuildError::CyclicHierarchy(names));
+            return Err(ScheduleBuildError::CyclicDependency(names));
         }
 
-        let systems = Systems {
+        let mut hierarchy = HashMap::new();
+        for index in phases.topology() {
+            if let Some(parent) = phases.nodes()[*index].parent {
+                hierarchy.entry(parent).or_insert(vec![]).push(*index);
+            }
+        }
+
+        let phases = phases.map(|_, config| config.build(world, mode));
+
+        Ok(Systems {
             mode,
             phases: phases.into_immutable(),
-            hierarchy: hierarchy.into_immutable(),
+            hierarchy,
             map: self.map,
-        };
-
-        Ok(systems)
+        })
     }
 }
 
@@ -210,7 +218,7 @@ impl std::fmt::Display for ScheduleBuildError {
 pub struct Systems {
     mode: RunMode,
     phases: ImmutableIndexDag<PhaseNode>,
-    hierarchy: ImmutableIndexDag<usize>,
+    hierarchy: HashMap<usize, Vec<usize>>,
     map: HashMap<&'static str, usize>,
 }
 
@@ -226,8 +234,116 @@ impl Systems {
             let mut stack = vec![index];
             while let Some(index) = stack.pop() {
                 self.phases.nodes()[index].run(world);
-                stack.extend(self.hierarchy.dependents()[index].ones());
+                if let Some(children) = self.hierarchy.get(&index) {
+                    for child in children.iter().rev() {
+                        stack.insert(0, *child);
+                    }
+                }
             }
+        }
+    }
+}
+
+mod tests {
+    use crate::{system::{executor::RunMode, schedule::{Schedule, ScheduleBuildError}}, world::World};
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    struct TestPhase(&'static str);
+
+    impl super::Phase for TestPhase {
+        fn name(&self) -> &'static str {
+            self.0
+        }
+    }
+
+    #[test]
+    fn test_phase_ordering() {
+        let mut schedule = Schedule::new(RunMode::Sequential);
+        let phase1 = TestPhase("Phase1");
+        let phase2 = TestPhase("Phase2");
+        let phase3 = TestPhase("Phase3");
+
+        schedule.run_before(phase2, phase3); // Phase2 runs before Phase3
+        schedule.run_after(phase1, phase3); // Phase1 runs after Phase3
+
+        let mut world = World::new();
+        let systems = schedule.build(&mut world).unwrap();
+
+        let topology: Vec<_> = systems
+            .phases
+            .topology()
+            .iter()
+            .map(|&i| systems.phases.nodes()[i].phase.name())
+            .collect();
+        assert_eq!(topology, vec!["Phase2", "Phase3", "Phase1"]);
+    }
+
+    #[test]
+    fn test_hierarchy() {
+        let mut schedule = Schedule::new(RunMode::Sequential);
+        let main_phase = TestPhase("MainPhase");
+        let sub_phase1 = TestPhase("SubPhase1");
+        let sub_phase2 = TestPhase("SubPhase2");
+
+        schedule.add_sub_phase(main_phase, sub_phase1);
+        schedule.add_sub_phase(main_phase, sub_phase2);
+
+        let mut world = World::new();
+        let systems = schedule.build(&mut world).unwrap();
+
+        let main_index = systems.map["MainPhase"];
+        let sub_indices = systems.hierarchy.get(&main_index).unwrap();
+        let sub_names: Vec<_> = sub_indices
+            .iter()
+            .map(|&i| systems.phases.nodes()[i].phase.name())
+            .collect();
+
+        assert!(sub_names.contains(&"SubPhase1"));
+        assert!(sub_names.contains(&"SubPhase2"));
+    }
+
+    #[test]
+    fn test_cyclic_dependency_error() {
+        let mut schedule = Schedule::new(RunMode::Sequential);
+        let phase1 = TestPhase("Phase1");
+        let phase2 = TestPhase("Phase2");
+        let phase3 = TestPhase("Phase3");
+
+        schedule.run_before(phase2, phase3); // Phase2 runs before Phase3
+        schedule.run_before(phase3, phase1); // Phase3 runs before Phase1
+        schedule.run_before(phase1, phase2); // Phase1 runs before Phase2 (creates a cycle)
+
+        let mut world = World::new();
+        let result = schedule.build(&mut world);
+
+        assert!(result.is_err());
+        if let Err(ScheduleBuildError::CyclicDependency(names)) = result {
+            assert!(names.contains(&"Phase1"));
+            assert!(names.contains(&"Phase2"));
+            assert!(names.contains(&"Phase3"));
+        } else {
+            panic!("Expected a cyclic dependency error");
+        }
+    }
+
+    #[test]
+    fn test_cyclic_hierarchy_error() {
+        let mut schedule = Schedule::new(RunMode::Sequential);
+        let main_phase = TestPhase("MainPhase");
+        let sub_phase = TestPhase("SubPhase");
+
+        schedule.add_sub_phase(main_phase, sub_phase);
+        schedule.add_sub_phase(sub_phase, main_phase); // Creates a cyclic hierarchy
+
+        let mut world = World::new();
+        let result = schedule.build(&mut world);
+
+        assert!(result.is_err());
+        if let Err(ScheduleBuildError::CyclicHierarchy(names)) = result {
+            assert!(names.contains(&"MainPhase"));
+            assert!(names.contains(&"SubPhase"));
+        } else {
+            panic!("Expected a cyclic hierarchy error");
         }
     }
 }
