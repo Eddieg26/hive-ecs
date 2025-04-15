@@ -1,7 +1,7 @@
 use super::SystemExecutor;
 use crate::{
     core::{ImmutableIndexDag, IndexDag},
-    system::{System, SystemCell},
+    system::SystemCell,
     world::WorldCell,
 };
 use fixedbitset::FixedBitSet;
@@ -50,7 +50,7 @@ impl ParallelExecutor {
 }
 
 impl SystemExecutor for ParallelExecutor {
-    fn execute(&self, world: WorldCell) {
+    fn execute(&self, mut world: WorldCell) {
         let (sender, receiver) = channel::<ExecutionResult>();
 
         std::thread::scope(|scope| {
@@ -71,6 +71,14 @@ impl SystemExecutor for ParallelExecutor {
                 }
             }
         });
+
+        for index in self.systems.topology() {
+            unsafe {
+                self.systems.nodes()[*index]
+                    .cast_mut()
+                    .apply(world.get_mut())
+            };
+        }
 
         self.reset();
     }

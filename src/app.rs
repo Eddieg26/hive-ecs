@@ -81,9 +81,9 @@ impl AppBuilder {
     }
 
     pub fn build(&mut self) -> App {
-        let app = std::mem::take(self);
-        let systems = app.schedule.build(&mut self.world).unwrap();
-        let send = self.world.resources().send();
+        let mut app = std::mem::take(self);
+        let systems = app.schedule.build(&mut app.world).unwrap();
+        let send = app.world.resources().send();
 
         App {
             world: app.world,

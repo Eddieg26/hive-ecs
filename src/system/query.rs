@@ -1,4 +1,5 @@
 use crate::core::{Frame, ObjectStatus, blob::Ptr, storage::SparseIndex};
+use crate::system::Access;
 use crate::world::{
     Component, ComponentId, Components, Entity, World,
     archetype::{
@@ -8,6 +9,7 @@ use crate::world::{
     cell::WorldCell,
 };
 
+use super::SystemAccess;
 use super::arg::SystemArg;
 
 pub trait BaseQuery {
@@ -28,6 +30,10 @@ pub trait BaseQuery {
     ) -> Self::State<'w>;
 
     fn get<'w>(state: &mut Self::State<'w>, entity: Entity, row: RowIndex) -> Self::Item<'w>;
+
+    fn access(_: &Self::Data) -> Vec<SystemAccess> {
+        vec![]
+    }
 }
 
 pub trait BaseFilter: for<'w> BaseQuery<Item<'w> = bool> {}
@@ -251,6 +257,13 @@ impl<C: Component> BaseQuery for &C {
             .get(row.to_usize())
             .expect(&format!("Component not found for entity: {:?}", entity))
     }
+
+    fn access(data: &Self::Data) -> Vec<SystemAccess> {
+        vec![SystemAccess::Component {
+            id: *data,
+            access: Access::Read,
+        }]
+    }
 }
 
 pub struct WriteQuery<'a, C: Component> {
@@ -316,6 +329,13 @@ impl<C: Component> BaseQuery for &mut C {
 
         component
     }
+
+    fn access(data: &Self::Data) -> Vec<SystemAccess> {
+        vec![SystemAccess::Component {
+            id: *data,
+            access: Access::Write,
+        }]
+    }
 }
 
 impl<C: Component> BaseQuery for Option<&C> {
@@ -352,6 +372,10 @@ impl<C: Component> BaseQuery for Option<&C> {
             None => None,
         }
     }
+
+    fn access(data: &Self::Data) -> Vec<SystemAccess> {
+        <&C as BaseQuery>::access(data)
+    }
 }
 
 impl<C: Component> BaseQuery for Option<&mut C> {
@@ -387,6 +411,10 @@ impl<C: Component> BaseQuery for Option<&mut C> {
             Some(state) => Some(<&mut C as BaseQuery>::get(state, entity, row)),
             None => None,
         }
+    }
+
+    fn access(data: &Self::Data) -> Vec<SystemAccess> {
+        <&mut C as BaseQuery>::access(data)
     }
 }
 
@@ -476,6 +504,10 @@ unsafe impl<Q: BaseQuery + 'static, F: BaseFilter + 'static> SystemArg for Query
         system: &super::SystemMeta,
     ) -> Self::Item<'world, 'state> {
         unsafe { Query::with_frame(world.get(), state, system.frame) }
+    }
+
+    fn access(state: &Self::State) -> Vec<super::SystemAccess> {
+        Q::access(&state.data)
     }
 }
 
@@ -600,7 +632,15 @@ macro_rules! impl_base_query_for_tuples {
                     ($(
                         $name::get($name, entity, row),
                     )*)
+                }
 
+                fn access(data: &Self::Data) -> Vec<SystemAccess> {
+                    let ($($name,)*) = data;
+                    let mut access = vec![];
+                    $(
+                        access.extend($name::access($name));
+                    )*
+                    access
                 }
             }
         )+

@@ -1,9 +1,9 @@
 use app::App;
 use system::{
-    query::{Added, Query, QueryState},
+    query::{Added, Query},
     schedule::Phase,
 };
-use world::Component;
+use world::{Component, Spawner};
 
 pub mod app;
 pub mod core;
@@ -17,28 +17,26 @@ pub struct Update;
 impl Phase for Update {}
 
 fn main() {
-    // let mut world = world::World::new();
-    // world.register::<Name>();
-    // world.register::<Age>();
-
-    // let entity = world.spawn();
-    // world.add_component(entity, Age(30));
-    // world.add_component(entity, Name("Alice".to_string()));
-
-    // let state = QueryState::new(&world);
-    // let query = Query::<(&Age, &Name), Added<Age>>::new(&world, &state);
-    // for (age, name) in query.iter() {
-    //     println!("Query found age: {:?}", age);
-    //     println!("Query found name: {:?}", name);
-    // }
-
     App::new()
         .register::<Name>()
         .register::<Age>()
-        .add_systems(Update, || {
-            println!("Running update phase");
+        .add_systems(Start, |mut spawner: Spawner| {
+            println!("Spawning entity");
+            spawner
+                .spawn()
+                .with(Name("Alice".to_string()))
+                .with(Age(30))
+                .finish();
+        })
+        .add_systems(Update, |query: Query<(&Age, &Name), Added<Age>>| {
+            println!("Running query");
+            for (age, name) in query.iter() {
+                println!("Query found age: {:?}", age);
+                println!("Query found name: {:?}", name);
+            }
         })
         .build()
+        .run(Start)
         .run(Update);
 }
 

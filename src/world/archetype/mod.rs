@@ -187,13 +187,13 @@ impl Archetypes {
         self.add_entity_inner(entity, row);
     }
 
-    pub fn add_components(&mut self, frame: Frame, entity: Entity, components: Row) {
+    pub fn add_components(&mut self, frame: Frame, entity: Entity, mut components: Row) {
         let (_, mut row) = match self.remove_entity(entity) {
             Some((id, row)) => (id, row),
             None => (ArchetypeId::EMPTY, Row::new()),
         };
 
-        for (id, mut component) in components {
+        while let Some((id, mut component)) = components.remove_at(0) {
             match row.contains(id) {
                 true => component.modify(frame),
                 false => component.add(frame),
@@ -262,6 +262,10 @@ impl Archetypes {
             None => {
                 let mut bits = self.bitset.clone();
                 id.iter().for_each(|id| bits.set(id.to_usize(), true));
+
+                if id.len() > 1 {
+                    println!("Archetype with multiple components: {:?}", id);
+                }
 
                 let archetype_id = ArchetypeId(self.archetypes.len() as u32);
                 let archetype = Archetype::new(archetype_id, components.into_table(entity), bits);

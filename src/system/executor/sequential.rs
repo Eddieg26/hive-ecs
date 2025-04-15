@@ -23,10 +23,13 @@ impl SequentialExecutor {
 }
 
 impl SystemExecutor for SequentialExecutor {
-    fn execute(&self, world: crate::world::WorldCell) {
+    fn execute(&self, mut world: crate::world::WorldCell) {
         for index in &self.order {
             let system = &self.systems[*index];
-            unsafe { system.cast_mut().run(world) };
+            unsafe {
+                system.cast_mut().run(world);
+                system.cast_mut().apply(world.get_mut())
+            };
         }
     }
 }

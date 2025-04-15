@@ -32,6 +32,8 @@ pub unsafe trait SystemArg: Sized {
         true
     }
 
+    fn apply(state: &mut Self::State, world: &mut World) {}
+
     fn access(state: &Self::State) -> Vec<SystemAccess> {
         vec![]
     }
@@ -257,6 +259,11 @@ macro_rules! impl_into_system_configs {
                     self($($arg,)*);
                 };
 
+                let apply = move |state: &mut Box<dyn Any + Send + Sync>, world: &mut World| {
+                    let ($($arg,)*) = state.downcast_mut::<($($arg::State,)*)>().unwrap();
+                    $($arg::apply($arg, world);)*
+                };
+
                 let access = |state: &Box<dyn Any + Send + Sync>| {
                     let ($($arg,)*) = state.downcast_ref::<($($arg::State,)*)>().unwrap();
                     let mut access = Vec::new();
@@ -274,7 +281,8 @@ macro_rules! impl_into_system_configs {
                     send,
                     dependencies: std::collections::HashSet::new(),
                     init,
-                    execute: Box::new(execute),
+                    run: Box::new(execute),
+                    apply: Box::new(apply),
                     access
                 })
             }
@@ -327,6 +335,11 @@ macro_rules! impl_into_system_configs {
 
             fn send() -> bool {
                 ($($arg::send() &&)* true)
+            }
+
+            fn apply(state: &mut Self::State, world: &mut World) {
+                let ($($arg,)*) = state;
+                $($arg::apply($arg, world);)*
             }
 
             fn access(state: &Self::State) -> Vec<SystemAccess> {

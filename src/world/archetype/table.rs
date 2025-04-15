@@ -180,6 +180,10 @@ impl Row {
         self.0.remove(id)
     }
 
+    pub fn remove_at(&mut self, index: usize) -> Option<(ComponentId, TableCell)> {
+        self.0.remove_at(index)
+    }
+
     pub fn len(&self) -> usize {
         self.0.len()
     }
@@ -222,14 +226,6 @@ impl Row {
             entities,
             columns: columns.into(),
         }
-    }
-}
-
-impl Iterator for Row {
-    type Item = (ComponentId, TableCell);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.drain().next().map(|(id, cell)| (id, cell))
     }
 }
 

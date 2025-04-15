@@ -60,7 +60,7 @@ impl Components {
                 let meta = ComponentMeta::new::<C>(id);
 
                 self.components.push(meta);
-                self.map.insert(TypeId::of::<C>(), id);
+                self.map.insert(ty, id);
 
                 id
             }
@@ -84,6 +84,10 @@ impl Components {
             .get(&TypeId::of::<C>())
             .copied()
             .unwrap_or_else(|| panic!("Component not registered: {}", std::any::type_name::<C>()))
+    }
+
+    pub fn metas(&self) -> &[ComponentMeta] {
+        &self.components
     }
 
     pub fn len(&self) -> usize {

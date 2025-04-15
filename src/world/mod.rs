@@ -2,6 +2,7 @@ use crate::core::Frame;
 
 pub mod archetype;
 pub mod cell;
+pub mod command;
 pub mod component;
 pub mod entity;
 pub mod event;
@@ -9,6 +10,7 @@ pub mod resource;
 
 pub use archetype::*;
 pub use cell::*;
+pub use command::*;
 pub use component::*;
 pub use entity::*;
 pub use event::*;

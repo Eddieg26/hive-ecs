@@ -269,6 +269,20 @@ impl<I: SparseIndex, V> SparseSet<I, V> {
         Some(value)
     }
 
+    pub fn remove_at(&mut self, index: usize) -> Option<(I, V)> {
+        if index >= self.values.len() {
+            return None;
+        }
+
+        let value = self.values.swap_remove(index);
+        let key = self.indices.swap_remove(index);
+        if index != self.values.len() {
+            let last_index = self.indices[index];
+            self.sparse.get_mut(last_index).map(|i| *i = index);
+        }
+        Some((key, value))
+    }
+
     pub fn contains(&self, index: I) -> bool {
         self.sparse.contains(index)
     }

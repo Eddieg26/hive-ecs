@@ -1,4 +1,4 @@
-use super::{System, SystemCell};
+use super::SystemCell;
 use crate::{core::IndexDag, world::WorldCell};
 
 pub mod parallel;

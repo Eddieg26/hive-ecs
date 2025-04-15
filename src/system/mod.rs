@@ -69,7 +69,8 @@ pub struct SystemConfig {
     dependencies: HashSet<SystemId>,
     init: fn(&mut World) -> Box<dyn Any + Send + Sync>,
     access: fn(&Box<dyn Any + Send + Sync>) -> Vec<SystemAccess>,
-    execute: SystemRun,
+    run: SystemRun,
+    apply: SystemApply,
 }
 
 impl SystemConfig {
@@ -102,7 +103,7 @@ impl SystemConfig {
         };
 
         SystemNode {
-            system: System::new(meta, state, self.execute),
+            system: System::new(meta, state, self.run, self.apply),
             dependencies: self.dependencies,
         }
     }
@@ -242,9 +243,10 @@ impl<F: Fn() + Send + Sync + 'static> IntoSystemConfigs<()> for F {
             dependencies: HashSet::new(),
             init: |_| Box::new(()),
             access: |_| vec![],
-            execute: Box::new(move |_, _, _| {
+            run: Box::new(move |_, _, _| {
                 self();
             }),
+            apply: Box::new(|_, _| {}),
         })
     }
 
@@ -256,20 +258,32 @@ impl<F: Fn() + Send + Sync + 'static> IntoSystemConfigs<()> for F {
 pub type SystemState = Box<dyn Any + Send + Sync>;
 pub type SystemRun =
     Box<dyn Fn(&mut Box<dyn Any + Send + Sync>, WorldCell, &SystemMeta) + Send + Sync>;
+pub type SystemApply = Box<dyn Fn(&mut Box<dyn Any + Send + Sync>, &mut World) + Send + Sync>;
 
 pub struct System {
     meta: SystemMeta,
     state: SystemState,
     run: SystemRun,
+    apply: SystemApply,
 }
 
 impl System {
-    pub fn new(meta: SystemMeta, state: SystemState, run: SystemRun) -> Self {
-        Self { meta, state, run }
+    pub fn new(meta: SystemMeta, state: SystemState, run: SystemRun, apply: SystemApply) -> Self {
+        Self {
+            meta,
+            state,
+            run,
+            apply,
+        }
     }
 
     pub fn run(&mut self, world: WorldCell) {
         (self.run)(&mut self.state, world, &self.meta);
+        self.meta.frame = unsafe { world.get().frame() }
+    }
+
+    pub fn apply(&mut self, world: &mut World) {
+        (self.apply)(&mut self.state, world);
     }
 }
 
