@@ -122,11 +122,6 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
         }
     }
 
-    fn execute(&self) {
-        let state = self.state.lock().unwrap();
-        self.spawn_systems(state);
-    }
-
     fn scoped(&self) -> Self {
         let world = self.world;
         let systems = self.systems;
@@ -150,6 +145,11 @@ impl<'scope, 'env: 'scope> ExecutionContext<'scope, 'env> {
 
     fn spawn_non_send(&self, index: usize) {
         self.sender.send(ExecutionResult::Run(index)).unwrap();
+    }
+
+    fn execute(&self) {
+        let state = self.state.lock().unwrap();
+        self.spawn_systems(state);
     }
 
     fn spawn_systems(&self, mut state: MutexGuard<'_, ExecutionState>) {

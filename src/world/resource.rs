@@ -105,6 +105,7 @@ impl Drop for ResourceCell {
 pub struct Resources {
     resources: SparseArray<ResourceId, ResourceCell>,
     map: HashMap<TypeId, ResourceId>,
+    send: bool,
 }
 
 impl Resources {
@@ -112,10 +113,16 @@ impl Resources {
         Self {
             resources: SparseArray::new(),
             map: HashMap::new(),
+            send: true,
         }
     }
 
+    pub fn send(&self) -> bool {
+        self.send
+    }
+
     pub fn register<const SEND: bool, R: Resource>(&mut self) -> ResourceId {
+        self.send = self.send && SEND;
         let id = TypeId::of::<R>();
         match self.map.get(&id).copied() {
             Some(id) => id,

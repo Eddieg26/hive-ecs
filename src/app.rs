@@ -82,10 +82,12 @@ impl AppBuilder {
 
     pub fn build(mut self) -> App {
         let systems = self.schedule.build(&mut self.world).unwrap();
+        let send = self.world.resources().send();
 
         App {
             world: self.world,
             systems,
+            send,
         }
     }
 }
@@ -93,11 +95,16 @@ impl AppBuilder {
 pub struct App {
     world: World,
     systems: Systems,
+    send: bool,
 }
 
 impl App {
     pub fn new() -> AppBuilder {
         AppBuilder::new()
+    }
+
+    pub fn send(&self) -> bool {
+        self.send
     }
 
     pub fn world(&self) -> &World {
