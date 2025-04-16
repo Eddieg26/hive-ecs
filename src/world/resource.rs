@@ -1,4 +1,7 @@
-use crate::core::{Frame, storage::SparseIndex};
+use crate::{
+    core::{Frame, storage::SparseIndex},
+    ext,
+};
 use std::{any::TypeId, collections::HashMap, thread::ThreadId};
 
 pub trait Resource: Sized + 'static {}
@@ -30,7 +33,7 @@ pub struct ResourceMeta {
 impl ResourceMeta {
     pub fn new<const SEND: bool, R: Resource>(offset: usize) -> Self {
         Self {
-            name: std::any::type_name::<R>(),
+            name: ext::short_type_name::<R>(),
             added: Frame::ZERO,
             modified: Frame::ZERO,
             exists: false,
@@ -122,7 +125,11 @@ impl Resources {
         self.add_with_frame::<SEND, R>(resource, Frame::ZERO)
     }
 
-    pub fn add_with_frame<const SEND: bool, R: Resource>(&mut self, resource: R, frame: Frame) -> ResourceId {
+    pub fn add_with_frame<const SEND: bool, R: Resource>(
+        &mut self,
+        resource: R,
+        frame: Frame,
+    ) -> ResourceId {
         let ty = TypeId::of::<R>();
         let id = match self.index.get(&ty).copied() {
             Some(id) => id,

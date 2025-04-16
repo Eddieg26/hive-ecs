@@ -790,3 +790,353 @@ impl<'a, T: 'static> Iterator for BlobIterMut<'a, T> {
         }
     }
 }
+
+pub mod v2 {
+    use std::{
+        alloc::Layout,
+        ptr::{self},
+    };
+
+    #[derive(Debug, Clone, Copy)]
+    pub struct TypeMeta {
+        pub name: &'static str,
+        pub layout: Layout,
+        pub drop: Option<fn(data: *mut u8)>,
+    }
+
+    impl TypeMeta {
+        pub fn new<T: 'static>() -> Self {
+            Self {
+                name: std::any::type_name::<T>(),
+                layout: Layout::new::<T>(),
+                drop: match std::mem::needs_drop::<T>() {
+                    true => Some(Self::drop::<T> as fn(*mut u8)),
+                    false => None,
+                },
+            }
+        }
+
+        fn drop<T>(data: *mut u8) {
+            unsafe {
+                let raw = data as *mut T;
+                std::mem::drop(raw.read());
+            }
+        }
+    }
+
+    pub struct Blob {
+        data: Vec<u8>,
+        meta: TypeMeta,
+    }
+
+    impl Blob {
+        pub fn new<T: 'static>() -> Self {
+            let meta = TypeMeta::new::<T>();
+
+            Self { data: vec![], meta }
+        }
+
+        pub unsafe fn from_raw(data: Vec<u8>, meta: TypeMeta) -> Self {
+            Self { data, meta }
+        }
+
+        pub fn with_meta(meta: TypeMeta) -> Self {
+            Self { data: vec![], meta }
+        }
+
+        pub fn data(&self) -> &[u8] {
+            &self.data
+        }
+
+        pub fn meta(&self) -> &TypeMeta {
+            &self.meta
+        }
+
+        pub fn get<T: 'static>(&mut self, index: usize) -> Option<&T> {
+            assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
+
+            let offset = index * self.meta.layout.size();
+            if offset >= self.data.len() - self.meta.layout.size() {
+                return None;
+            }
+
+            unsafe { (self.data.as_ptr() as *const T).as_ref() }
+        }
+
+        pub fn get_mut<T: 'static>(&mut self, index: usize) -> Option<&mut T> {
+            assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
+
+            let offset = index * self.meta.layout.size();
+            if offset >= self.data.len() - self.meta.layout.size() {
+                return None;
+            }
+
+            unsafe { (self.data.as_mut_ptr() as *mut T).as_mut() }
+        }
+
+        pub fn push<T: 'static>(&mut self, value: T) {
+            assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
+
+            let offset = self.data.len();
+            self.data.resize(offset + self.meta.layout.size(), 0);
+
+            unsafe {
+                let dst = self.data.as_mut_ptr().add(offset);
+                ptr::write(dst as *mut T, value);
+            };
+        }
+
+        pub fn insert<T: 'static>(&mut self, index: usize, value: T) {
+            assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
+
+            let offset = index * self.meta.layout.size();
+            let bounds = self.data.len() - self.meta.layout.size();
+            if offset > bounds {
+                panic!("Index out of bounds: {}", index);
+            }
+
+            self.data.reserve(self.meta.layout.size());
+
+            unsafe {
+                let src = self.data.as_ptr().add(offset);
+                let dst = self.data.as_mut_ptr().add(offset + self.meta.layout.size());
+
+                ptr::copy(src, dst, self.data.len() - offset);
+                ptr::write(src as *mut T, value);
+            }
+        }
+
+        pub fn append<T: 'static>(&mut self, values: &mut Vec<T>) {
+            assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
+
+            let offset = self.data.len();
+            self.data
+                .resize(offset + self.meta.layout.size() * values.len(), 0);
+
+            unsafe {
+                let dst = self.data.as_mut_ptr().add(offset) as *mut T;
+                let src = values.as_mut_ptr();
+
+                ptr::copy_nonoverlapping(src, dst, values.len());
+
+                values.set_len(0);
+            }
+        }
+
+        pub fn remove<T: 'static>(&mut self, index: usize) -> T {
+            assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
+
+            let offset = index * self.meta.layout.size();
+            if offset > self.data.len() - self.meta.layout.size() {
+                panic!("Index out of bounds: {}", index);
+            }
+
+            unsafe {
+                let src = self.data.as_ptr().add(offset) as *const T;
+                let value = ptr::read::<T>(src);
+
+                self.data.drain(offset..offset + self.meta.layout.size());
+
+                value
+            }
+        }
+
+        pub fn swap_remove<T: 'static>(&mut self, index: usize) -> T {
+            assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
+
+            let offset = index * self.meta.layout.size();
+            let bounds = self.data.len() - self.meta.layout.size();
+
+            if offset > bounds {
+                panic!("Index out of bounds: {}", index);
+            }
+
+            unsafe {
+                let dst = self.data.as_mut_ptr().add(offset) as *mut T;
+                let src = self.data.as_ptr().add(bounds) as *const T;
+
+                let value = ptr::read(dst);
+                if offset != bounds {
+                    ptr::copy_nonoverlapping(src, dst, 1);
+                }
+
+                self.data.set_len(bounds);
+
+                value
+            }
+        }
+
+        pub fn extend(&mut self, value: Vec<u8>) {
+            assert!(value.len() % self.meta.layout.size() == 0);
+
+            self.data.extend(value);
+        }
+
+        pub fn insert_raw(&mut self, index: usize, value: Vec<u8>) {
+            let offset = index * self.meta.layout.size();
+            if offset > self.data.len() - self.meta.layout.size() {
+                panic!("Index out of bounds: {}", index);
+            }
+
+            self.data.reserve(value.len());
+
+            unsafe {
+                let src = self.data.as_ptr().add(offset);
+                let dst = self.data.as_mut_ptr().add(offset + self.meta.layout.size());
+
+                ptr::copy(src, dst, self.data.len() - offset);
+                ptr::copy_nonoverlapping(value.as_ptr(), src as *mut u8, value.len());
+            }
+        }
+
+        pub fn remove_raw(&mut self, index: usize) -> Vec<u8> {
+            let offset = index * self.meta.layout.size();
+            if offset > self.data.len() - self.meta.layout.size() {
+                panic!("Index out of bounds: {}", index);
+            }
+
+            self.data
+                .drain(offset..offset + self.meta.layout.size())
+                .collect()
+        }
+
+        pub fn swap_remove_raw(&mut self, index: usize) -> Vec<u8> {
+            let offset = index * self.meta.layout.size();
+            if offset > self.data.len() - self.meta.layout.size() {
+                panic!("Index out of bounds: {}", index);
+            }
+
+            unsafe {
+                let mut bytes = vec![0u8; self.meta.layout.size()];
+                let src = self
+                    .data
+                    .as_ptr()
+                    .add(self.data.len() - self.meta.layout.size());
+                ptr::copy_nonoverlapping(src, bytes.as_mut_ptr(), bytes.len());
+
+                let bytes = self
+                    .data
+                    .splice(offset..offset + self.meta.layout.size(), bytes)
+                    .collect::<Vec<_>>();
+
+                self.data.set_len(self.data.len() - self.meta.layout.size());
+
+                bytes
+            }
+        }
+
+        pub fn len(&self) -> usize {
+            self.data.len() / self.meta.layout.size()
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.data.len() == 0
+        }
+
+        pub fn clear(&mut self) {
+            self.data.clear();
+        }
+
+        pub fn into_raw(mut self) -> (Vec<u8>, TypeMeta) {
+            (std::mem::take(&mut self.data), self.meta)
+        }
+
+        pub fn to_vec<T: 'static>(self) -> Vec<T> {
+            unsafe {
+                let values = Vec::from_raw_parts(
+                    self.data.as_ptr() as *mut T,
+                    self.len(),
+                    self.data.capacity() / self.meta.layout.size(),
+                );
+
+                std::mem::forget(self);
+
+                values
+            }
+        }
+    }
+
+    impl Drop for Blob {
+        fn drop(&mut self) {
+            if let Some(drop) = self.meta.drop {
+                for index in 0..self.len() {
+                    let offset = index * self.meta.layout.size();
+                    let value = unsafe { self.data.as_mut_ptr().add(offset) };
+                    drop(value);
+                }
+            }
+
+            self.data.clear();
+        }
+    }
+
+    pub struct BlobCell {
+        data: Vec<u8>,
+        meta: TypeMeta,
+    }
+
+    impl BlobCell {
+        pub fn new<T: 'static>(value: T) -> Self {
+            let meta = TypeMeta::new::<T>();
+            let mut data = vec![0u8; meta.layout.size()];
+
+            unsafe { ptr::write(data.as_mut_ptr() as *mut T, value) };
+
+            Self { data, meta }
+        }
+
+        pub unsafe fn from_raw(data: Vec<u8>, meta: TypeMeta) -> Self {
+            Self { data, meta }
+        }
+
+        pub fn data(&self) -> &[u8] {
+            &self.data
+        }
+
+        pub fn meta(&self) -> &TypeMeta {
+            &self.meta
+        }
+
+        pub fn get<T: 'static>(&self) -> &T {
+            assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
+
+            unsafe { (self.data.as_ptr() as *const T).as_ref().unwrap() }
+        }
+
+        pub fn get_mut<T: 'static>(&mut self) -> &mut T {
+            assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
+
+            unsafe { (self.data.as_mut_ptr() as *mut T).as_mut().unwrap() }
+        }
+
+        pub fn into_raw(mut self) -> (Vec<u8>, TypeMeta) {
+            let data = std::mem::take(&mut self.data);
+            let meta = self.meta;
+
+            std::mem::forget(self);
+
+            (data, meta)
+        }
+
+        pub fn into_value<T: 'static>(self) -> T {
+            assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
+
+            let value = unsafe { std::ptr::read(self.data.as_ptr() as *const T) };
+
+            std::mem::forget(self);
+
+            value
+        }
+    }
+
+    impl Drop for BlobCell {
+        fn drop(&mut self) {
+            if let Some(drop) = self.meta.drop {
+                let value = self.data.as_mut_ptr();
+                drop(value);
+            }
+
+            self.data.clear();
+        }
+    }
+}

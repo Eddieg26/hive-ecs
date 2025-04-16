@@ -1,3 +1,4 @@
+use crate::ext;
 use std::{alloc::Layout, any::TypeId, collections::HashMap};
 
 pub trait Component: Send + Sync + 'static {}
@@ -13,14 +14,9 @@ pub struct ComponentMeta {
 
 impl ComponentMeta {
     pub fn new<C: Component>(id: ComponentId) -> Self {
-        let name = std::any::type_name::<C>();
-
         Self {
             id,
-            name: match name.rfind(":") {
-                Some(index) => &name[index..],
-                None => name,
-            },
+            name: ext::short_type_name::<C>(),
             layout: Layout::new::<C>(),
         }
     }

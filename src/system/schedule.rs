@@ -4,6 +4,7 @@ use super::{
 };
 use crate::{
     core::{ImmutableIndexDag, IndexDag},
+    ext::{self},
     world::{World, WorldCell},
 };
 use std::collections::HashMap;
@@ -33,7 +34,7 @@ pub trait Phase: 'static {
     }
 
     fn name(&self) -> &'static str {
-        std::any::type_name::<Self>()
+        ext::short_type_name::<Self>()
     }
 }
 

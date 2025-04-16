@@ -332,6 +332,10 @@ impl Table {
         self.columns.get(component)
     }
 
+    pub fn get_column_mut(&mut self, component: ComponentId) -> Option<&mut Column> {
+        self.columns.get_mut(component)
+    }
+
     pub fn modify_component(&mut self, entity: Entity, component: ComponentId, frame: Frame) {
         let Some(index) = self.entities.get_index_of(&entity) else {
             return;

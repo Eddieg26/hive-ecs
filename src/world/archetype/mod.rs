@@ -32,6 +32,10 @@ impl Archetype {
         &self.table
     }
 
+    pub fn table_mut(&mut self) -> &mut Table {
+        &mut self.table
+    }
+
     pub fn contains(&self, components: &FixedBitSet) -> bool {
         self.bitset.is_superset(components)
     }
@@ -276,6 +280,20 @@ impl Archetypes {
                 archetype_id
             }
         }
+    }
+}
+
+impl std::ops::Index<ArchetypeId> for Archetypes {
+    type Output = Archetype;
+
+    fn index(&self, index: ArchetypeId) -> &Self::Output {
+        &self.archetypes[index.0 as usize]
+    }
+}
+
+impl std::ops::IndexMut<ArchetypeId> for Archetypes {
+    fn index_mut(&mut self, index: ArchetypeId) -> &mut Self::Output {
+        &mut self.archetypes[index.0 as usize]
     }
 }
 

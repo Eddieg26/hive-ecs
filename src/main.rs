@@ -12,6 +12,7 @@ use world::{
 
 pub mod app;
 pub mod core;
+pub mod ext;
 pub mod system;
 pub mod world;
 

@@ -66,6 +66,10 @@ impl World {
         &self.archetypes
     }
 
+    pub fn archetypes_mut(&mut self) -> &mut Archetypes {
+        &mut self.archetypes
+    }
+
     pub fn resources(&self) -> &Resources {
         &self.resources
     }
@@ -186,6 +190,7 @@ impl World {
         unsafe { WorldCell::new(self) }
     }
 }
+
 
 impl World {
     pub fn spawn(&mut self) -> Entity {
