@@ -107,11 +107,11 @@ impl World {
     }
 
     pub fn add_resource<R: Resource + Send>(&mut self, resource: R) {
-        self.resources.add::<true, R>(resource, self.frame);
+        self.resources.add::<true, R>(resource);
     }
 
     pub fn add_non_send_resource<R: Resource>(&mut self, resource: R) {
-        self.resources.add::<false, R>(resource, self.frame);
+        self.resources.add::<false, R>(resource);
     }
 
     pub fn resource<R: Resource + Send>(&self) -> &R {

@@ -118,7 +118,11 @@ impl Resources {
         ResourceId(index as u32)
     }
 
-    pub fn add<const SEND: bool, R: Resource>(&mut self, resource: R, frame: Frame) -> ResourceId {
+    pub fn add<const SEND: bool, R: Resource>(&mut self, resource: R) -> ResourceId {
+        self.add_with_frame::<SEND, R>(resource, Frame::ZERO)
+    }
+
+    pub fn add_with_frame<const SEND: bool, R: Resource>(&mut self, resource: R, frame: Frame) -> ResourceId {
         let ty = TypeId::of::<R>();
         let id = match self.index.get(&ty).copied() {
             Some(id) => id,

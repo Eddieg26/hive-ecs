@@ -32,8 +32,8 @@ fn main() {
     //     .run(Update);
 
     let mut resources = Resources::new();
-    let age = resources.add::<true, _>(Age(30), Frame::ZERO);
-    let name = resources.add::<true, _>(Name("John"), Frame::ZERO);
+    let age = resources.add::<true, _>(Age(30));
+    let name = resources.add::<true, _>(Name("John"));
 
     let age = resources.get::<Age>(age).unwrap();
     println!("{:?}", age);
