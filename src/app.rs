@@ -83,12 +83,10 @@ impl AppBuilder {
     pub fn build(&mut self) -> App {
         let mut app = std::mem::take(self);
         let systems = app.schedule.build(&mut app.world).unwrap();
-        let send = app.world.resources().send();
 
         App {
             world: app.world,
             systems,
-            send,
         }
     }
 }
@@ -102,16 +100,11 @@ impl Default for AppBuilder {
 pub struct App {
     world: World,
     systems: Systems,
-    send: bool,
 }
 
 impl App {
     pub fn new() -> AppBuilder {
         AppBuilder::new()
-    }
-
-    pub fn send(&self) -> bool {
-        self.send
     }
 
     pub fn world(&self) -> &World {
@@ -120,6 +113,10 @@ impl App {
 
     pub fn systems(&self) -> &Systems {
         &self.systems
+    }
+
+    pub fn is_send(&self) -> bool {
+        self.world.resources().is_send()
     }
 
     pub fn run(&mut self, phase: impl Phase) -> &mut Self {

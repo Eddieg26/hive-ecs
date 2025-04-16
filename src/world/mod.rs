@@ -107,55 +107,75 @@ impl World {
     }
 
     pub fn add_resource<R: Resource + Send>(&mut self, resource: R) {
-        self.resources.add::<true, R>(resource);
+        self.resources.add::<true, R>(resource, self.frame);
     }
 
     pub fn add_non_send_resource<R: Resource>(&mut self, resource: R) {
-        self.resources.add::<false, R>(resource);
+        self.resources.add::<false, R>(resource, self.frame);
     }
 
     pub fn resource<R: Resource + Send>(&self) -> &R {
-        self.resources.get::<R>().expect(&format!(
-            "Resource not found: {}",
-            std::any::type_name::<R>()
-        ))
+        self.resources
+            .get_id::<R>()
+            .and_then(|id| self.resources.get::<R>(id))
+            .expect(&format!(
+                "Resource not found: {}",
+                std::any::type_name::<R>()
+            ))
     }
 
     pub fn resource_mut<R: Resource + Send>(&mut self) -> &mut R {
-        self.resources.get_mut::<R>().expect(&format!(
-            "Resource not found: {}",
-            std::any::type_name::<R>()
-        ))
+        self.resources
+            .get_id::<R>()
+            .and_then(|id| self.resources.get_mut::<R>(id))
+            .expect(&format!(
+                "Resource not found: {}",
+                std::any::type_name::<R>()
+            ))
     }
 
     pub fn try_resource<R: Resource + Send>(&self) -> Option<&R> {
-        self.resources.get::<R>()
+        self.resources
+            .get_id::<R>()
+            .and_then(|id| self.resources.get::<R>(id))
     }
 
     pub fn try_resource_mut<R: Resource + Send>(&mut self) -> Option<&mut R> {
-        self.resources.get_mut::<R>()
+        self.resources
+            .get_id::<R>()
+            .and_then(|id| self.resources.get_mut::<R>(id))
     }
 
     pub fn non_send_resource<R: Resource>(&self) -> &R {
-        self.resources.get::<R>().expect(&format!(
-            "Non Send Resource not found: {}",
-            std::any::type_name::<R>()
-        ))
+        self.resources
+            .get_id::<R>()
+            .and_then(|id| self.resources.get::<R>(id))
+            .expect(&format!(
+                "Non Send Resource not found: {}",
+                std::any::type_name::<R>()
+            ))
     }
 
     pub fn non_send_resource_mut<R: Resource>(&mut self) -> &mut R {
-        self.resources.get_mut::<R>().expect(&format!(
-            "Non Send Resource not found: {}",
-            std::any::type_name::<R>()
-        ))
+        self.resources
+            .get_id::<R>()
+            .and_then(|id| self.resources.get_mut::<R>(id))
+            .expect(&format!(
+                "Non Send Resource not found: {}",
+                std::any::type_name::<R>()
+            ))
     }
 
     pub fn try_non_send_resource<R: Resource>(&self) -> Option<&R> {
-        self.resources.get::<R>()
+        self.resources
+            .get_id::<R>()
+            .and_then(|id| self.resources.get::<R>(id))
     }
 
     pub fn try_non_send_resource_mut<R: Resource>(&mut self) -> Option<&mut R> {
-        self.resources.get_mut::<R>()
+        self.resources
+            .get_id::<R>()
+            .and_then(|id| self.resources.get_mut::<R>(id))
     }
 
     pub fn remove_resource<R: Resource>(&mut self) -> Option<R> {
@@ -202,14 +222,6 @@ impl World {
 
     pub fn remove_components(&mut self, entity: Entity, components: Vec<ComponentId>) {
         self.archetypes.remove_components(entity, components);
-    }
-
-    pub fn modify_component<C: Component>(&mut self, entity: Entity) {
-        self.archetypes.modify_component::<C>(entity, self.frame);
-    }
-
-    pub fn modify_resource<R: Resource>(&mut self) {
-        self.resources.modify::<R>(self.frame);
     }
 
     pub fn update(&mut self) {

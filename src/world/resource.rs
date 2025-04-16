@@ -1,8 +1,4 @@
-use crate::core::{
-    Frame, ObjectStatus,
-    blob::BlobCell,
-    storage::{SparseArray, SparseIndex},
-};
+use crate::core::{Frame, storage::SparseIndex};
 use std::{any::TypeId, collections::HashMap, thread::ThreadId};
 
 pub trait Resource: Sized + 'static {}
@@ -19,22 +15,30 @@ impl SparseIndex for ResourceId {
     }
 }
 
-pub struct ResourceCell {
+pub struct ResourceMeta {
     name: &'static str,
-    data: BlobCell,
-    owner: Option<ThreadId>,
+    added: Frame,
+    modified: Frame,
+    exists: bool,
     send: bool,
-    status: ObjectStatus,
+    offset: usize,
+    size: usize,
+    drop: fn(*mut u8),
+    owner: Option<ThreadId>,
 }
 
-impl ResourceCell {
-    pub fn new<const SEND: bool, R: Resource>(resource: R) -> Self {
+impl ResourceMeta {
+    pub fn new<const SEND: bool, R: Resource>(offset: usize) -> Self {
         Self {
             name: std::any::type_name::<R>(),
-            data: BlobCell::new(resource),
-            owner: Some(std::thread::current().id()),
+            added: Frame::ZERO,
+            modified: Frame::ZERO,
+            exists: false,
             send: SEND,
-            status: ObjectStatus::new(),
+            offset,
+            size: std::mem::size_of::<R>(),
+            drop: |ptr| unsafe { std::ptr::drop_in_place(ptr as *mut R) },
+            owner: None,
         }
     }
 
@@ -42,144 +46,182 @@ impl ResourceCell {
         self.name
     }
 
-    pub fn get<R: Resource>(&self) -> &R {
-        if !self.has_access(std::thread::current().id()) {
-            panic!("Accessing non send resource from another thread is forbidden.")
-        }
-
-        self.data.value::<R>()
+    pub fn exists(&self) -> bool {
+        self.exists
     }
 
-    pub fn get_mut<R: Resource>(&mut self) -> &mut R {
-        if !self.has_access(std::thread::current().id()) {
-            panic!("Accessing non send resource from another thread is forbidden.")
-        }
-
-        self.data.value_mut::<R>()
+    pub fn added(&self) -> Frame {
+        self.added
     }
 
-    pub fn into<R: Resource>(mut self) -> R {
-        if !self.has_access(std::thread::current().id()) {
-            panic!("Accessing non send resource from another thread is forbidden.")
-        }
-
-        let data = std::mem::take(&mut self.data);
-        data.into()
-    }
-
-    pub fn owner(&self) -> Option<ThreadId> {
-        self.owner
-    }
-
-    pub fn status(&self) -> ObjectStatus {
-        self.status
-    }
-
-    pub fn modify(&mut self, frame: Frame) {
-        if !self.has_access(std::thread::current().id()) {
-            panic!("Accessing non send resource from another thread is forbidden.")
-        }
-
-        self.status.modified = frame;
-    }
-
-    pub fn has_access(&self, id: ThreadId) -> bool {
-        self.send || self.owner == Some(id)
-    }
-}
-
-impl Drop for ResourceCell {
-    fn drop(&mut self) {
-        let id = std::thread::current().id();
-        if !self.has_access(id) && !std::thread::panicking() {
-            let name = self.name();
-            let owner = self.owner();
-            panic!(
-                "Dopping a non-send resource {} that is owned by thread {:?} from thread {:?} is not allowed.",
-                name, owner, id
-            );
-        }
-    }
-}
-
-pub struct Resources {
-    resources: SparseArray<ResourceId, ResourceCell>,
-    map: HashMap<TypeId, ResourceId>,
-    send: bool,
-}
-
-impl Resources {
-    pub fn new() -> Self {
-        Self {
-            resources: SparseArray::new(),
-            map: HashMap::new(),
-            send: true,
-        }
+    pub fn modified(&self) -> Frame {
+        self.modified
     }
 
     pub fn send(&self) -> bool {
         self.send
     }
 
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
+    pub fn owner(&self) -> Option<ThreadId> {
+        self.owner
+    }
+
+    /// Check if the resource is accessible from the current thread.
+    pub fn has_access(&self) -> bool {
+        self.send || self.owner == Some(std::thread::current().id())
+    }
+}
+
+pub struct Resources {
+    data: Vec<u8>,
+    meta: Vec<ResourceMeta>,
+    index: HashMap<TypeId, ResourceId>,
+    is_send: bool,
+}
+
+impl Resources {
+    pub fn new() -> Self {
+        Self {
+            data: Vec::new(),
+            meta: Vec::new(),
+            index: HashMap::new(),
+            is_send: true,
+        }
+    }
+
+    pub fn is_send(&self) -> bool {
+        self.is_send
+    }
+
     pub fn register<const SEND: bool, R: Resource>(&mut self) -> ResourceId {
-        self.send = self.send && SEND;
         let id = TypeId::of::<R>();
-        match self.map.get(&id).copied() {
-            Some(id) => id,
-            None => {
-                let resource_id = ResourceId(self.resources.len() as u32);
-                self.map.insert(id, resource_id);
-                self.resources.reserve(resource_id);
-                resource_id
-            }
+        if let Some(id) = self.index.get(&id).copied() {
+            return id;
         }
+
+        let index = self.meta.len();
+        let meta = ResourceMeta::new::<SEND, R>(self.data.len());
+
+        self.is_send = self.is_send && SEND;
+        self.data.resize(meta.offset + meta.size, 0);
+        self.index.insert(id, ResourceId(index as u32));
+        self.meta.push(meta);
+
+        ResourceId(index as u32)
     }
 
-    pub fn add<const SEND: bool, R: Resource>(&mut self, resource: R) -> ResourceId {
-        let id = TypeId::of::<R>();
-        match self.map.get(&id).copied() {
+    pub fn add<const SEND: bool, R: Resource>(&mut self, resource: R, frame: Frame) -> ResourceId {
+        let ty = TypeId::of::<R>();
+        let id = match self.index.get(&ty).copied() {
             Some(id) => id,
-            None => {
-                let resource_id = ResourceId(self.resources.len() as u32);
-                self.map.insert(id, resource_id);
-                self.resources
-                    .insert(resource_id, ResourceCell::new::<SEND, R>(resource));
-                resource_id
-            }
-        }
-    }
-
-    pub fn get<R: Resource>(&self) -> Option<&R> {
-        let id = self.map.get(&TypeId::of::<R>())?;
-        self.resources.get(*id).map(|cell| cell.get())
-    }
-
-    pub fn get_mut<R: Resource>(&mut self) -> Option<&mut R> {
-        let id = self.map.get(&TypeId::of::<R>())?;
-        self.resources.get_mut(*id).map(|cell| cell.get_mut())
-    }
-
-    pub fn modify<R: Resource>(&mut self, frame: Frame) {
-        let Some(id) = self.map.get(&TypeId::of::<R>()) else {
-            return;
+            None => self.register::<SEND, R>(),
         };
 
-        self.resources[*id]
-            .as_mut()
-            .and_then(|cell| Some(cell.modify(frame)));
+        let (offset, size) = {
+            let meta = &mut self.meta[id.to_usize()];
+            meta.added = frame;
+            meta.exists = true;
+            (meta.offset, meta.size)
+        };
+
+        unsafe {
+            let dst = self.data[offset..offset + size].as_mut_ptr();
+            std::ptr::copy_nonoverlapping(&resource as *const R as *const u8, dst, size);
+
+            std::mem::forget(resource);
+        }
+
+        id
     }
 
-    pub fn contains<R: Resource>(&self) -> bool {
-        self.map.contains_key(&TypeId::of::<R>())
+    pub fn get_id<R: Resource>(&self) -> Option<ResourceId> {
+        let id = TypeId::of::<R>();
+        self.index.get(&id).copied()
+    }
+
+    pub fn get<R: Resource>(&self, id: ResourceId) -> Option<&R> {
+        let id = id.to_usize();
+        let meta = self.meta.get(id)?;
+        if !meta.exists || !meta.has_access() {
+            return None;
+        }
+
+        let data = &self.data[meta.offset..meta.offset + meta.size];
+        Some(unsafe { &*(data.as_ptr() as *const R) })
+    }
+
+    pub fn get_mut<R: Resource>(&mut self, id: ResourceId) -> Option<&mut R> {
+        let id = id.to_usize();
+        let meta = self.meta.get(id)?;
+        if !meta.exists || !meta.has_access() {
+            return None;
+        }
+
+        let data = &mut self.data[meta.offset..meta.offset + meta.size];
+        Some(unsafe { &mut *(data.as_mut_ptr() as *mut R) })
+    }
+
+    pub fn get_meta(&self, id: ResourceId) -> Option<&ResourceMeta> {
+        self.meta.get(id.to_usize())
     }
 
     pub fn remove<R: Resource>(&mut self) -> Option<R> {
-        let id = self.map.get(&TypeId::of::<R>())?;
-        self.resources.remove(*id).map(|r| r.into())
+        let id = TypeId::of::<R>();
+        let id = self.index.get(&id).copied()?;
+        let meta = self.meta.get_mut(id.to_usize())?;
+        if !meta.exists || !meta.has_access() {
+            return None;
+        }
+        meta.exists = false;
+
+        let data = &mut self.data[meta.offset..meta.offset + meta.size];
+        let resource = unsafe { std::ptr::read(data.as_mut_ptr() as *const R) };
+
+        return Some(resource);
+    }
+
+    pub fn modify(&mut self, id: ResourceId, frame: Frame) {
+        let id = id.to_usize();
+        if let Some(meta) = self.meta.get_mut(id) {
+            if meta.exists && meta.has_access() {
+                meta.modified = frame;
+            }
+        }
+    }
+
+    pub fn contains<R: Resource>(&self) -> bool {
+        let ty = TypeId::of::<R>();
+        let id = match self.index.get(&ty).copied() {
+            Some(id) => id,
+            None => return false,
+        };
+
+        let id = id.to_usize();
+        self.meta.get(id).map_or(false, |meta| meta.exists)
     }
 
     pub fn len(&self) -> usize {
-        self.resources.len()
+        self.meta.len()
+    }
+}
+
+impl Drop for Resources {
+    fn drop(&mut self) {
+        for meta in std::mem::take(&mut self.meta) {
+            if meta.exists {
+                let data = &mut self.data[meta.offset..meta.offset + meta.size];
+                let drop = meta.drop;
+                drop(data.as_mut_ptr())
+            }
+        }
     }
 }
 
