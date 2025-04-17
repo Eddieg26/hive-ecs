@@ -852,33 +852,34 @@ pub mod v2 {
             &self.meta
         }
 
-        pub fn get<T: 'static>(&mut self, index: usize) -> Option<&T> {
+        pub fn get<T: 'static>(&self, index: usize) -> Option<&T> {
             assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
 
             let offset = index * self.meta.layout.size();
-            if offset >= self.data.len() - self.meta.layout.size() {
+            if self.data.is_empty() || offset > self.data.len() - self.meta.layout.size() {
                 return None;
             }
 
-            unsafe { (self.data.as_ptr() as *const T).as_ref() }
+            unsafe { (self.data.as_ptr().add(offset) as *const T).as_ref() }
         }
 
         pub fn get_mut<T: 'static>(&mut self, index: usize) -> Option<&mut T> {
             assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
 
             let offset = index * self.meta.layout.size();
-            if offset >= self.data.len() - self.meta.layout.size() {
+            if self.data.is_empty() || offset > self.data.len() - self.meta.layout.size() {
                 return None;
             }
 
-            unsafe { (self.data.as_mut_ptr() as *mut T).as_mut() }
+            unsafe { (self.data.as_mut_ptr().add(offset) as *mut T).as_mut() }
         }
 
         pub fn push<T: 'static>(&mut self, value: T) {
             assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
 
             let offset = self.data.len();
-            self.data.resize(offset + self.meta.layout.size(), 0);
+            self.data
+                .resize(self.data.len() + self.meta.layout.size(), 0);
 
             unsafe {
                 let dst = self.data.as_mut_ptr().add(offset);
@@ -894,8 +895,8 @@ pub mod v2 {
             if offset > bounds {
                 panic!("Index out of bounds: {}", index);
             }
-
-            self.data.reserve(self.meta.layout.size());
+            self.data
+                .resize(self.data.len() + self.meta.layout.size(), 0);
 
             unsafe {
                 let src = self.data.as_ptr().add(offset);
@@ -906,7 +907,7 @@ pub mod v2 {
             }
         }
 
-        pub fn append<T: 'static>(&mut self, values: &mut Vec<T>) {
+        pub fn append<T: 'static>(&mut self, values: Vec<T>) {
             assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
 
             let offset = self.data.len();
@@ -914,12 +915,12 @@ pub mod v2 {
                 .resize(offset + self.meta.layout.size() * values.len(), 0);
 
             unsafe {
+                let src = values.as_ptr() as *mut T;
                 let dst = self.data.as_mut_ptr().add(offset) as *mut T;
-                let src = values.as_mut_ptr();
 
                 ptr::copy_nonoverlapping(src, dst, values.len());
 
-                values.set_len(0);
+                std::mem::forget(values);
             }
         }
 
@@ -927,7 +928,7 @@ pub mod v2 {
             assert_eq!(std::mem::size_of::<T>(), self.meta.layout.size());
 
             let offset = index * self.meta.layout.size();
-            if offset > self.data.len() - self.meta.layout.size() {
+            if self.data.is_empty() || offset > self.data.len() - self.meta.layout.size() {
                 panic!("Index out of bounds: {}", index);
             }
 
@@ -966,19 +967,18 @@ pub mod v2 {
             }
         }
 
-        pub fn extend(&mut self, value: Vec<u8>) {
+        pub unsafe fn append_raw(&mut self, value: Vec<u8>) {
             assert!(value.len() % self.meta.layout.size() == 0);
 
             self.data.extend(value);
         }
 
-        pub fn insert_raw(&mut self, index: usize, value: Vec<u8>) {
+        pub unsafe fn insert_raw(&mut self, index: usize, value: Vec<u8>) {
             let offset = index * self.meta.layout.size();
-            if offset > self.data.len() - self.meta.layout.size() {
+            if self.data.is_empty() || offset > self.data.len() - self.meta.layout.size() {
                 panic!("Index out of bounds: {}", index);
             }
-
-            self.data.reserve(value.len());
+            self.data.resize(self.data.len() + value.len(), 0);
 
             unsafe {
                 let src = self.data.as_ptr().add(offset);
@@ -989,9 +989,9 @@ pub mod v2 {
             }
         }
 
-        pub fn remove_raw(&mut self, index: usize) -> Vec<u8> {
+        pub unsafe fn remove_raw(&mut self, index: usize) -> Vec<u8> {
             let offset = index * self.meta.layout.size();
-            if offset > self.data.len() - self.meta.layout.size() {
+            if self.data.is_empty() || offset > self.data.len() - self.meta.layout.size() {
                 panic!("Index out of bounds: {}", index);
             }
 
@@ -1000,9 +1000,9 @@ pub mod v2 {
                 .collect()
         }
 
-        pub fn swap_remove_raw(&mut self, index: usize) -> Vec<u8> {
+        pub unsafe fn swap_remove_raw(&mut self, index: usize) -> Vec<u8> {
             let offset = index * self.meta.layout.size();
-            if offset > self.data.len() - self.meta.layout.size() {
+            if self.data.is_empty() || offset > self.data.len() - self.meta.layout.size() {
                 panic!("Index out of bounds: {}", index);
             }
 
@@ -1069,6 +1069,31 @@ pub mod v2 {
             self.data.clear();
         }
     }
+
+    impl From<BlobCell> for Blob {
+        fn from(value: BlobCell) -> Self {
+            let blob = Self {
+                data: unsafe {
+                    Vec::from_raw_parts(
+                        value.data.as_ptr() as *mut u8,
+                        value.data.len(),
+                        value.data.capacity(),
+                    )
+                },
+                meta: value.meta,
+            };
+
+            std::mem::forget(value);
+
+            blob
+        }
+    }
+
+    // impl Into<Blob> for BlobCell {
+    //     fn into(self) -> Blob {
+    //         todo!()
+    //     }
+    // }
 
     pub struct BlobCell {
         data: Vec<u8>,
@@ -1137,6 +1162,215 @@ pub mod v2 {
             }
 
             self.data.clear();
+        }
+    }
+
+    #[allow(unused_imports)]
+    mod tests {
+        use super::{Blob, BlobCell, TypeMeta};
+
+        #[test]
+        fn blob_from_raw() {
+            let values = [10, 20, 30, 40];
+            let mut bytes = vec![0u8; std::mem::size_of::<i32>() * 4];
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    values.as_ptr() as *const u8,
+                    bytes.as_mut_ptr(),
+                    std::mem::size_of::<i32>() * 4,
+                )
+            };
+
+            let meta = TypeMeta::new::<i32>();
+
+            let blob = unsafe { Blob::from_raw(bytes, meta) };
+            for (index, value) in values.iter().enumerate() {
+                assert_eq!(blob.get::<i32>(index), Some(value));
+            }
+        }
+
+        #[test]
+        fn blob_push_and_get() {
+            let mut blob = Blob::new::<i32>();
+            blob.push(10);
+            blob.push(20);
+            blob.push(30);
+
+            assert_eq!(blob.get(0), Some(&10));
+            assert_eq!(blob.get(1), Some(&20));
+            assert_eq!(blob.get(2), Some(&30));
+        }
+
+        #[test]
+        fn blob_insert_and_get_mut() {
+            let mut blob = Blob::new::<i32>();
+            blob.push(10);
+            blob.push(30);
+            blob.push(40);
+            blob.insert(1, 20);
+
+            assert_eq!(blob.get(0), Some(&10));
+            assert_eq!(blob.get(1), Some(&20));
+            assert_eq!(blob.get(2), Some(&30));
+            assert_eq!(blob.get_mut(3), Some(&mut 40));
+        }
+
+        #[test]
+        fn blob_append() {
+            let values = vec![10, 20, 30, 40];
+            let mut blob = Blob::new::<i32>();
+            blob.append(values.clone());
+
+            for (index, value) in values.iter().enumerate() {
+                assert_eq!(blob.get::<i32>(index), Some(value));
+            }
+        }
+
+        #[test]
+        fn blob_remove() {
+            let mut blob = Blob::new::<i32>();
+            blob.push(10);
+            blob.push(20);
+
+            let value = blob.remove::<i32>(1);
+            assert_eq!(value, 20);
+
+            let value = blob.remove::<i32>(0);
+            assert_eq!(value, 10);
+        }
+
+        #[test]
+        fn blob_swap_remove() {
+            let mut blob = Blob::new::<i32>();
+            blob.push(10);
+            blob.push(20);
+            blob.push(30);
+
+            let value = blob.swap_remove::<i32>(0);
+            assert_eq!(value, 10);
+
+            let value = blob.get::<i32>(0);
+            assert_eq!(value, Some(&30));
+        }
+
+        #[test]
+        fn blob_append_raw() {
+            let values = [10, 20, 30, 40];
+            let mut bytes = vec![0u8; std::mem::size_of::<i32>() * 4];
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    values.as_ptr() as *const u8,
+                    bytes.as_mut_ptr(),
+                    std::mem::size_of::<i32>() * 4,
+                )
+            };
+
+            let mut blob = Blob::new::<i32>();
+            unsafe { blob.append_raw(bytes) };
+
+            for (index, value) in values.iter().enumerate() {
+                assert_eq!(blob.get::<i32>(index), Some(value));
+            }
+        }
+
+        #[test]
+        fn blob_insert_raw() {
+            let value = 20;
+            let mut bytes = vec![0u8; std::mem::size_of::<i32>()];
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    std::ptr::addr_of!(value) as *const u8,
+                    bytes.as_mut_ptr(),
+                    std::mem::size_of::<i32>(),
+                )
+            };
+
+            let mut blob = Blob::new::<i32>();
+            blob.push(10);
+            blob.push(30);
+            blob.push(40);
+
+            unsafe { blob.insert_raw(1, bytes) };
+            assert_eq!(blob.get(0), Some(&10));
+            assert_eq!(blob.get(1), Some(&20));
+            assert_eq!(blob.get(2), Some(&30));
+            assert_eq!(blob.get(3), Some(&40));
+        }
+
+        #[test]
+        fn blob_remove_raw() {
+            let mut blob = Blob::new::<i32>();
+            blob.push(10);
+
+            let bytes = unsafe { blob.remove_raw(0) };
+            let value = unsafe { (bytes.as_ptr() as *const i32).as_ref().unwrap() };
+            assert_eq!(value, &10);
+        }
+
+        #[test]
+        fn blob_swap_remove_raw() {
+            let mut blob = Blob::new::<i32>();
+            blob.push(10);
+            blob.push(20);
+            blob.push(30);
+
+            let bytes = unsafe { blob.swap_remove_raw(0) };
+            let value = unsafe { (bytes.as_ptr() as *const i32).as_ref().unwrap() };
+            assert_eq!(value, &10);
+            assert_eq!(blob.get(0), Some(&30));
+        }
+
+        #[test]
+        fn blob_to_vec() {
+            let values = vec![10, 20, 30, 40];
+            let mut blob = Blob::new::<i32>();
+            blob.append(values.clone());
+
+            assert_eq!(values, blob.to_vec::<i32>());
+        }
+
+        #[test]
+        fn blob_from_blob_cell() {
+            let cell = BlobCell::new(10);
+            let blob = Blob::from(cell);
+
+            assert_eq!(blob.get(0), Some(&10));
+        }
+
+        #[test]
+        fn blob_cell_into_blob() {
+            let cell = BlobCell::new(10);
+            let blob: Blob = cell.into();
+
+            assert_eq!(blob.get(0), Some(&10));
+        }
+
+        #[test]
+        fn blob_cell_new() {
+            let blob = BlobCell::new(10);
+
+            assert_eq!(blob.get::<i32>(), &10);
+        }
+
+        #[test]
+        fn blob_cell_from_raw() {
+            let value = 10;
+            let mut bytes = vec![0u8; std::mem::size_of::<i32>()];
+            unsafe {
+                std::ptr::write(bytes.as_mut_ptr() as *mut i32, value);
+            }
+
+            let meta = TypeMeta::new::<i32>();
+            let blob = unsafe { BlobCell::from_raw(bytes, meta) };
+
+            assert_eq!(blob.get::<i32>(), &10);
+        }
+
+        #[test]
+        fn blob_cell_into_value() {
+            let blob = BlobCell::new(10);
+
+            assert_eq!(blob.into_value::<i32>(), 10);
         }
     }
 }
