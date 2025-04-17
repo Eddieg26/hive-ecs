@@ -1,5 +1,5 @@
 use super::{Component, ComponentId, Components, Entity};
-use crate::core::{Frame, bitset::FixedBitSet, storage::SparseIndex};
+use crate::core::{Frame, bitset::FixedBitSet, sparse::SparseIndex};
 use std::{collections::HashMap, fmt::Debug};
 
 pub mod table;

@@ -1,4 +1,4 @@
-use crate::core::{Frame, ObjectStatus, blob::Ptr, storage::SparseIndex};
+use crate::core::{Frame, ObjectStatus, blob::Ptr, sparse::SparseIndex};
 use crate::system::Access;
 use crate::world::{
     Component, ComponentId, Components, Entity, World,

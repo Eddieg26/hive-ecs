@@ -1,5 +1,5 @@
 use crate::{
-    core::{Frame, storage::SparseIndex},
+    core::{Frame, sparse::SparseIndex},
     ext,
 };
 use std::{any::TypeId, collections::HashMap, thread::ThreadId};

@@ -2,7 +2,7 @@ use super::{Component, ComponentId, Entity, Frame};
 use crate::core::{
     blob::{Blob, BlobCell, Ptr},
     frame::ObjectStatus,
-    storage::{ImmutableSparseSet, SparseIndex, SparseSet},
+    sparse::{ImmutableSparseSet, SparseIndex, SparseSet},
 };
 use indexmap::IndexSet;
 use std::alloc::Layout;
