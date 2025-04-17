@@ -116,15 +116,7 @@ impl Archetypes {
     }
 
     pub fn query(&self, query: &ArchetypeQuery) -> Vec<&Archetype> {
-        let mut include = self.bitset.clone();
-        for id in query.components.iter().copied() {
-            include.set(id.to_usize(), true);
-        }
-
-        let mut exclude = self.bitset.clone();
-        for id in query.exclude.iter() {
-            exclude.set(id.to_usize(), true);
-        }
+        let ArchetypeQuery { include, exclude } = query;
 
         let mut archetypes = Vec::new();
         for archetype in &self.archetypes {
@@ -299,6 +291,26 @@ impl std::ops::IndexMut<ArchetypeId> for Archetypes {
 
 #[derive(Debug, Clone, Default)]
 pub struct ArchetypeQuery {
-    pub components: Vec<ComponentId>,
-    pub exclude: Vec<ComponentId>,
+    include: FixedBitSet,
+    exclude: FixedBitSet,
+}
+
+impl ArchetypeQuery {
+    pub fn get_include(&self) -> &FixedBitSet {
+        &self.include
+    }
+
+    pub fn get_exclude(&self) -> &FixedBitSet {
+        &self.exclude
+    }
+
+    pub fn include(&mut self, id: ComponentId) {
+        self.include.grow(id.to_usize() + 1);
+        self.include.set(id.to_usize(), true);
+    }
+
+    pub fn exclude(&mut self, id: ComponentId) {
+        self.exclude.grow(id.to_usize() + 1);
+        self.exclude.set(id.to_usize(), true);
+    }
 }

@@ -74,9 +74,7 @@ impl<C: Component> BaseQuery for Not<C> {
             std::any::type_name::<C>()
         ));
 
-        state.exclude.push(id);
-
-        ()
+        state.exclude(id)
     }
 
     fn state<'w>(_: &Self::Data, _: &'w Archetype, _: Frame, _: Frame) -> Self::State<'w> {
@@ -100,9 +98,7 @@ impl<C: Component> BaseQuery for With<C> {
             std::any::type_name::<C>()
         ));
 
-        state.components.push(id);
-
-        ()
+        state.include(id)
     }
 
     fn state<'w>(_: &Self::Data, _: &'w Archetype, _: Frame, _: Frame) -> Self::State<'w> {
@@ -232,7 +228,7 @@ impl<C: Component> BaseQuery for &C {
             std::any::type_name::<C>()
         ));
 
-        query.components.push(id);
+        query.include(id);
 
         id
     }
