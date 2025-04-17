@@ -191,7 +191,6 @@ impl World {
     }
 }
 
-
 impl World {
     pub fn spawn(&mut self) -> Entity {
         let entity = self.entities.spawn();
@@ -213,7 +212,7 @@ impl World {
     }
 
     pub fn add_component<C: Component>(&mut self, entity: Entity, component: C) {
-        self.archetypes.add_component(self.frame, entity, component);
+        self.archetypes.add_component(entity, component, self.frame);
     }
 
     pub fn remove_component<C: Component>(&mut self, entity: Entity) {
@@ -222,7 +221,7 @@ impl World {
 
     pub fn add_components(&mut self, entity: Entity, components: Row) {
         self.archetypes
-            .add_components(self.frame, entity, components);
+            .add_components(entity, components, self.frame);
     }
 
     pub fn remove_components(&mut self, entity: Entity, components: Vec<ComponentId>) {

@@ -63,6 +63,10 @@ impl TableCell {
         self.frame.modified = frame;
     }
 
+    pub fn into_value<T: 'static>(self) -> T {
+        self.data.into_value()
+    }
+
     pub fn into_raw(self) -> (Vec<u8>, TypeMeta) {
         self.data.into_raw()
     }
@@ -377,6 +381,10 @@ impl Table {
         let index = self.entities.get_index_of(&entity)?;
         let column = self.columns.get_mut(component)?;
         column.get_mut::<C>(index)
+    }
+
+    pub fn contains(&self, entity: Entity) -> bool {
+        self.entities.contains(&entity)
     }
 
     pub fn has_component(&self, id: ComponentId) -> bool {

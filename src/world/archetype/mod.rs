@@ -36,7 +36,11 @@ impl Archetype {
         &mut self.table
     }
 
-    pub fn contains(&self, components: &FixedBitSet) -> bool {
+    pub fn contains(&self, entity: Entity) -> bool {
+        self.table.contains(entity)
+    }
+
+    pub fn has_components(&self, components: &FixedBitSet) -> bool {
         self.bitset.is_superset(components)
     }
 
@@ -164,7 +168,7 @@ impl Archetypes {
         archetype.table.get_component_mut(entity, id)
     }
 
-    pub fn add_component<C: Component>(&mut self, frame: Frame, entity: Entity, component: C) {
+    pub fn add_component<C: Component>(&mut self, entity: Entity, component: C, frame: Frame) {
         let id = unsafe { self.components.get_id_unchecked::<C>() };
 
         let (_, mut row) = match self.remove_entity(entity) {
@@ -183,7 +187,7 @@ impl Archetypes {
         self.add_entity_inner(entity, row);
     }
 
-    pub fn add_components(&mut self, frame: Frame, entity: Entity, mut components: Row) {
+    pub fn add_components(&mut self, entity: Entity, mut components: Row, frame: Frame) {
         let (_, mut row) = match self.remove_entity(entity) {
             Some((id, row)) => (id, row),
             None => (ArchetypeId::EMPTY, Row::new()),
@@ -201,23 +205,29 @@ impl Archetypes {
         self.add_entity_inner(entity, row);
     }
 
-    pub fn remove_component<C: Component>(&mut self, entity: Entity) {
+    pub fn remove_component<C: Component>(&mut self, entity: Entity) -> Option<C> {
         let id = unsafe { self.components.get_id_unchecked::<C>() };
 
         let (_, mut row) = match self.remove_entity(entity) {
             Some(value) => value,
-            None => return,
+            None => return None,
         };
 
-        row.remove(id);
+        let component = row.remove(id);
 
         self.add_entity_inner(entity, row);
+
+        component.map(|c| c.into_value())
     }
 
-    pub fn remove_components(&mut self, entity: Entity, components: Vec<ComponentId>) {
+    pub fn remove_components(
+        &mut self,
+        entity: Entity,
+        components: Vec<ComponentId>,
+    ) -> Option<Row> {
         let (_, mut row) = match self.remove_entity(entity) {
             Some((id, row)) => (id, row),
-            None => return,
+            None => return None,
         };
 
         let mut removed = Row::new();
@@ -228,6 +238,8 @@ impl Archetypes {
         }
 
         self.add_entity_inner(entity, row);
+
+        Some(removed)
     }
 
     pub fn modify_component<C: Component>(&mut self, entity: Entity, frame: Frame) {
@@ -312,5 +324,144 @@ impl ArchetypeQuery {
     pub fn exclude(&mut self, id: ComponentId) {
         self.exclude.grow(id.to_usize() + 1);
         self.exclude.set(id.to_usize(), true);
+    }
+}
+
+mod tests {
+    use crate::{
+        core::Frame,
+        world::{Component, Entity, Row},
+    };
+
+    use super::{ArchetypeQuery, Archetypes};
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct Age(u32);
+    impl Component for Age {}
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct Name(&'static str);
+    impl Component for Name {}
+
+    #[test]
+    fn archetype_add_entity() {
+        let mut archetypes = Archetypes::new();
+        let entity = Entity::root(0);
+        let archetype = archetypes.add_entity(entity);
+
+        assert_eq!(archetypes.entity_archetype(entity), Some(archetype));
+    }
+
+    #[test]
+    fn archetype_add_component() {
+        let mut archetypes = Archetypes::new();
+        let entity = Entity::root(0);
+
+        archetypes.register::<Age>();
+        archetypes.add_entity(entity);
+        archetypes.add_component(entity, Age(0), Frame::ZERO);
+
+        let age = archetypes.get_component::<Age>(entity);
+        assert_eq!(age, Some(&Age(0)));
+    }
+
+    #[test]
+    fn archetype_add_components() {
+        let mut archetypes = Archetypes::new();
+        let entity = Entity::root(0);
+
+        let age = archetypes.register::<Age>();
+        let name = archetypes.register::<Name>();
+        archetypes.add_entity(entity);
+
+        let mut components = Row::new();
+        components.insert(age, Age(0));
+        components.insert(name, Name("Bob"));
+        archetypes.add_components(entity, components, Frame::ZERO);
+
+        let age = archetypes.get_component::<Age>(entity);
+        assert_eq!(age, Some(&Age(0)));
+
+        let name = archetypes.get_component::<Name>(entity);
+        assert_eq!(name, Some(&Name("Bob")));
+    }
+
+    #[test]
+    fn archetype_remove_component() {
+        let mut archetypes = Archetypes::new();
+        let entity = Entity::root(0);
+
+        archetypes.register::<Age>();
+        archetypes.add_entity(entity);
+        archetypes.add_component(entity, Age(0), Frame::ZERO);
+
+        let age = archetypes.remove_component::<Age>(entity);
+        assert_eq!(age, Some(Age(0)));
+    }
+
+    #[test]
+    fn archetype_remove_components() {
+        let mut archetypes = Archetypes::new();
+        let entity = Entity::root(0);
+
+        let age = archetypes.register::<Age>();
+        let name = archetypes.register::<Name>();
+        archetypes.add_entity(entity);
+
+        let mut components = Row::new();
+        components.insert(age, Age(0));
+        components.insert(name, Name("Bob"));
+        archetypes.add_components(entity, components, Frame::ZERO);
+
+        let components = vec![age, name];
+        let components = archetypes.remove_components(entity, components).unwrap();
+
+        let age = components.get::<Age>(age);
+        assert_eq!(age, Some(&Age(0)));
+
+        let name = components.get::<Name>(name);
+        assert_eq!(name, Some(&Name("Bob")));
+    }
+
+    #[test]
+    fn query_include() {
+        let mut archetypes = Archetypes::new();
+        let entity = Entity::root(0);
+
+        let age = archetypes.register::<Age>();
+        let name = archetypes.register::<Name>();
+
+        archetypes.add_component(entity, Age(0), Frame::ZERO);
+        archetypes.add_component(entity, Name("Bob"), Frame::ZERO);
+
+        let mut query = ArchetypeQuery::default();
+        query.include(age);
+        query.include(name);
+
+        let result = archetypes.query(&query);
+        let has_entity = result.iter().any(|archetype| archetype.contains(entity));
+
+        assert!(has_entity);
+    }
+
+    #[test]
+    fn query_exclude() {
+        let mut archetypes = Archetypes::new();
+        let entity = Entity::root(0);
+
+        let age = archetypes.register::<Age>();
+        let name = archetypes.register::<Name>();
+
+        archetypes.add_component(entity, Age(0), Frame::ZERO);
+        archetypes.add_component(entity, Name("Bob"), Frame::ZERO);
+
+        let mut query = ArchetypeQuery::default();
+        query.include(age);
+        query.exclude(name);
+
+        let result = archetypes.query(&query);
+        let has_entity = result.iter().any(|archetype| archetype.contains(entity));
+
+        assert!(!has_entity);
     }
 }
