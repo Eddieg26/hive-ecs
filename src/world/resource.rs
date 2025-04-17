@@ -327,3 +327,43 @@ impl<R: Resource + Clone> Clone for Cloned<R> {
         Self(self.0.clone())
     }
 }
+
+#[allow(unused_imports)]
+mod tests {
+    use std::rc::Rc;
+
+    use super::{Resource, Resources};
+
+    impl Resource for u32 {}
+
+    #[test]
+    fn resources_add() {
+        let mut resources = Resources::new();
+        let id = resources.add::<true, u32>(10);
+
+        assert_eq!(resources.get(id), Some(&10));
+    }
+
+    #[test]
+    fn resources_remove() {
+        let mut resources = Resources::new();
+        resources.add::<true, u32>(10);
+
+        let resource = resources.remove::<u32>();
+
+        assert_eq!(resource, Some(10));
+    }
+
+    #[test]
+    fn validate_resource_access() {
+        let mut resources = Resources::new();
+        let id = resources.add::<false, u32>(10);
+
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
+                let resource = resources.get::<u32>(id);
+                assert!(resource.is_none());
+            });
+        });
+    }
+}
