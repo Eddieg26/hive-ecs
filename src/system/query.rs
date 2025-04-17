@@ -320,12 +320,14 @@ impl<C: Component> BaseQuery for &mut C {
     }
 
     fn get<'w>(state: &mut Self::State<'w>, entity: Entity, row: RowIndex) -> Self::Item<'w> {
-        let component = state
-            .components
-            .get_mut(row.to_usize())
-            .expect(&format!("Component not found for entity: {:?}", entity));
+        let component = unsafe {
+            state.frames.get_mut(row.0 as usize).unwrap().modified = state.current_frame;
 
-        state.frames.get_mut(row.0 as usize).unwrap().modified = state.current_frame;
+            state
+                .components
+                .get_mut(row.to_usize())
+                .expect(&format!("Component not found for entity: {:?}", entity))
+        };
 
         component
     }

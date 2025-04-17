@@ -1,5 +1,6 @@
 use super::{Component, ComponentId, Entity, Frame};
 use crate::core::{
+    TypeMeta,
     blob::{Blob, BlobCell, Ptr},
     frame::ObjectStatus,
     sparse::{ImmutableSparseSet, SparseIndex, SparseSet},
@@ -35,19 +36,19 @@ impl TableCell {
     }
 
     pub fn get<T: Component>(&self) -> &T {
-        self.data.value::<T>()
+        self.data.get::<T>()
     }
 
     pub fn get_mut<T: Component>(&mut self) -> &mut T {
-        self.data.value_mut::<T>()
+        self.data.get_mut::<T>()
     }
 
     pub fn layout(&self) -> &Layout {
-        self.data.layout()
+        &self.data.meta().layout
     }
 
     pub fn drop(&self) -> Option<&fn(*mut u8)> {
-        self.data.drop()
+        self.data.meta().drop.as_ref()
     }
 
     pub fn frame(&self) -> &ObjectStatus {
@@ -61,6 +62,10 @@ impl TableCell {
     pub fn modify(&mut self, frame: Frame) {
         self.frame.modified = frame;
     }
+
+    pub fn into_raw(self) -> (Vec<u8>, TypeMeta) {
+        self.data.into_raw()
+    }
 }
 
 pub struct Column {
@@ -71,14 +76,7 @@ pub struct Column {
 impl Column {
     pub fn new<T: Component>() -> Self {
         Self {
-            data: Blob::new::<T>(1),
-            frames: Vec::new(),
-        }
-    }
-
-    pub fn with_layout(layout: Layout, drop: Option<fn(*mut u8)>) -> Self {
-        Self {
-            data: Blob::with_layout(layout, 1, drop),
+            data: Blob::new::<T>(),
             frames: Vec::new(),
         }
     }
@@ -92,10 +90,10 @@ impl Column {
     }
 
     pub unsafe fn get_ptr<T: Component>(&self) -> (Ptr<'_, T>, Ptr<'_, ObjectStatus>) {
-        let components = unsafe { self.data.ptr::<T>(0) };
+        let components = unsafe { self.data.ptr::<T>() };
         let frames = self.frames.as_ptr() as *mut ObjectStatus;
 
-        (components, Ptr::new(frames))
+        (components, unsafe { Ptr::new(frames) })
     }
 
     pub fn frames(&self) -> &[ObjectStatus] {
@@ -111,20 +109,30 @@ impl Column {
     }
 
     pub fn push_cell(&mut self, cell: TableCell) {
-        self.data.push_cell(cell.data);
+        unsafe { self.data.append_raw(cell.data.into_raw().0) };
         self.frames.push(cell.frame);
     }
 
     pub fn remove(&mut self, index: usize) -> Option<TableCell> {
-        let data = self.data.remove_cell_checked(index)?;
         let frame = self.frames.remove(index);
-        Some(TableCell { data, frame })
+        unsafe {
+            let data = self.data.remove_raw(index);
+            Some(TableCell {
+                data: BlobCell::from_raw(data, *self.data.meta()),
+                frame,
+            })
+        }
     }
 
     pub fn swap_remove(&mut self, index: usize) -> Option<TableCell> {
-        let data = self.data.swap_remove_cell_checked(index)?;
         let frame = self.frames.swap_remove(index);
-        Some(TableCell { data, frame })
+        unsafe {
+            let data = self.data.swap_remove_raw(index);
+            Some(TableCell {
+                data: BlobCell::from_raw(data, *self.data.meta()),
+                frame,
+            })
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -143,7 +151,7 @@ impl Column {
 impl From<TableCell> for Column {
     fn from(value: TableCell) -> Self {
         Self {
-            data: Blob::from_cell(value.data),
+            data: Blob::from(value.data),
             frames: vec![value.frame],
         }
     }
