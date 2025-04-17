@@ -149,7 +149,7 @@ impl From<TableCell> for Column {
     }
 }
 
-pub struct Row(SparseSet<ComponentId, TableCell>);
+pub struct Row(SparseSet<TableCell, ComponentId>);
 
 impl Row {
     pub fn new() -> Self {
@@ -217,7 +217,7 @@ impl Row {
             .0
             .drain()
             .map(|(id, cell)| (id, Column::from(cell)))
-            .collect::<SparseSet<ComponentId, Column>>();
+            .collect::<SparseSet<Column, ComponentId>>();
 
         let mut entities = IndexSet::new();
         entities.insert(entity);
@@ -260,7 +260,7 @@ impl SparseIndex for RowIndex {
 }
 
 pub struct TableBuilder {
-    columns: SparseSet<ComponentId, Column>,
+    columns: SparseSet<Column, ComponentId>,
 }
 
 impl TableBuilder {
@@ -290,7 +290,7 @@ impl TableBuilder {
 
 pub struct Table {
     entities: IndexSet<Entity>,
-    columns: ImmutableSparseSet<ComponentId, Column>,
+    columns: ImmutableSparseSet<Column, ComponentId>,
 }
 
 impl Table {

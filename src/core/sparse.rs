@@ -26,17 +26,21 @@ macro_rules! impl_sparse_index {
 
 impl_sparse_index!(u8, u16, u32, u64, usize);
 
-pub struct SparseArray<I, V = I> {
+pub struct SparseArray<V, I = V> {
     values: Vec<Option<V>>,
     _marker: std::marker::PhantomData<I>,
 }
 
-impl<I, V> SparseArray<I, V> {
+impl<V, I> SparseArray<V, I> {
     pub fn new() -> Self {
         Self {
             values: Vec::new(),
             _marker: std::marker::PhantomData,
         }
+    }
+
+    pub fn push(&mut self, value: V) {
+        self.values.push(Some(value));
     }
 
     pub fn len(&self) -> usize {
@@ -52,13 +56,13 @@ impl<I, V> SparseArray<I, V> {
     }
 }
 
-impl<I, V> Default for SparseArray<I, V> {
+impl<V, I> Default for SparseArray<V, I> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<I, V> SparseArray<I, V>
+impl<V, I> SparseArray<V, I>
 where
     I: SparseIndex,
 {
@@ -96,6 +100,10 @@ where
 
     pub fn remove(&mut self, index: I) -> Option<V> {
         let index = index.to_usize();
+        self.remove_at(index)
+    }
+
+    pub fn remove_at(&mut self, index: usize) -> Option<V> {
         if index < self.values.len() {
             self.values[index].take()
         } else {
@@ -113,7 +121,7 @@ where
     }
 }
 
-impl<I: SparseIndex, V> Index<I> for SparseArray<I, V> {
+impl<V, I: SparseIndex> Index<I> for SparseArray<V, I> {
     type Output = Option<V>;
 
     fn index(&self, index: I) -> &Self::Output {
@@ -126,7 +134,7 @@ impl<I: SparseIndex, V> Index<I> for SparseArray<I, V> {
     }
 }
 
-impl<I: SparseIndex, V> IndexMut<I> for SparseArray<I, V> {
+impl<V, I: SparseIndex> IndexMut<I> for SparseArray<V, I> {
     fn index_mut(&mut self, index: I) -> &mut Self::Output {
         let index = index.to_usize();
         if index >= self.values.len() {
@@ -136,12 +144,12 @@ impl<I: SparseIndex, V> IndexMut<I> for SparseArray<I, V> {
     }
 }
 
-pub struct ImmutableSparseArray<I, V> {
+pub struct ImmutableSparseArray<V, I = V> {
     values: Box<[Option<V>]>,
     _marker: std::marker::PhantomData<I>,
 }
 
-impl<I, V> ImmutableSparseArray<I, V> {
+impl<V, I> ImmutableSparseArray<V, I> {
     pub fn len(&self) -> usize {
         self.values.len()
     }
@@ -151,7 +159,7 @@ impl<I, V> ImmutableSparseArray<I, V> {
     }
 }
 
-impl<I: SparseIndex, V> ImmutableSparseArray<I, V> {
+impl<V, I: SparseIndex> ImmutableSparseArray<V, I> {
     pub fn get(&self, index: I) -> Option<&V> {
         let index = index.to_usize();
         self.values.get(index).and_then(|v| v.as_ref())
@@ -163,8 +171,8 @@ impl<I: SparseIndex, V> ImmutableSparseArray<I, V> {
     }
 }
 
-impl<I, V> From<SparseArray<I, V>> for ImmutableSparseArray<I, V> {
-    fn from(array: SparseArray<I, V>) -> Self {
+impl<V, I> From<SparseArray<V, I>> for ImmutableSparseArray<V, I> {
+    fn from(array: SparseArray<V, I>) -> Self {
         ImmutableSparseArray {
             values: array.values.into_boxed_slice(),
             _marker: std::marker::PhantomData,
@@ -172,13 +180,13 @@ impl<I, V> From<SparseArray<I, V>> for ImmutableSparseArray<I, V> {
     }
 }
 
-pub struct SparseSet<I, V> {
+pub struct SparseSet<V, I = V> {
     values: Vec<V>,
     indices: Vec<I>,
-    sparse: SparseArray<I, usize>,
+    sparse: SparseArray<usize, I>,
 }
 
-impl<I, V> SparseSet<I, V> {
+impl<V, I> SparseSet<V, I> {
     pub fn new() -> Self {
         Self {
             values: Vec::new(),
@@ -218,7 +226,7 @@ impl<I, V> SparseSet<I, V> {
     }
 }
 
-impl<I: SparseIndex, V> FromIterator<(I, V)> for SparseSet<I, V> {
+impl<V, I: SparseIndex> FromIterator<(I, V)> for SparseSet<V, I> {
     fn from_iter<T: IntoIterator<Item = (I, V)>>(iter: T) -> Self {
         let mut set = SparseSet::new();
         for (index, value) in iter {
@@ -228,13 +236,13 @@ impl<I: SparseIndex, V> FromIterator<(I, V)> for SparseSet<I, V> {
     }
 }
 
-impl<I, V> Default for SparseSet<I, V> {
+impl<V, I> Default for SparseSet<V, I> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<I: SparseIndex, V> SparseSet<I, V> {
+impl<V, I: SparseIndex> SparseSet<V, I> {
     pub fn get(&self, index: I) -> Option<&V> {
         let index = self.sparse.get(index)?;
         Some(&self.values[*index])
@@ -260,13 +268,7 @@ impl<I: SparseIndex, V> SparseSet<I, V> {
     pub fn remove(&mut self, index: I) -> Option<V> {
         let index = self.sparse.remove(index)?;
 
-        let value = self.values.swap_remove(index);
-        self.indices.swap_remove(index);
-        if index != self.values.len() {
-            let last_index = self.indices[index];
-            self.sparse.get_mut(last_index).map(|i| *i = index);
-        }
-        Some(value)
+        self.remove_at(index).map(|(_, v)| v)
     }
 
     pub fn remove_at(&mut self, index: usize) -> Option<(I, V)> {
@@ -295,15 +297,15 @@ impl<I: SparseIndex, V> SparseSet<I, V> {
     }
 }
 
-pub type SparseSetIter<'a, I, V> = std::iter::Zip<std::slice::Iter<'a, I>, std::slice::Iter<'a, V>>;
+pub type SparseSetIter<'a, V, I> = std::iter::Zip<std::slice::Iter<'a, I>, std::slice::Iter<'a, V>>;
 
-pub struct ImmutableSparseSet<I, V> {
+pub struct ImmutableSparseSet<V, I = V> {
     values: Box<[V]>,
     indices: Box<[I]>,
-    sparse: ImmutableSparseArray<I, usize>,
+    sparse: ImmutableSparseArray<usize, I>,
 }
 
-impl<I, V> ImmutableSparseSet<I, V> {
+impl<V, I> ImmutableSparseSet<V, I> {
     pub fn len(&self) -> usize {
         self.values.len()
     }
@@ -329,7 +331,7 @@ impl<I, V> ImmutableSparseSet<I, V> {
     }
 }
 
-impl<I: SparseIndex, V> ImmutableSparseSet<I, V> {
+impl<V, I: SparseIndex> ImmutableSparseSet<V, I> {
     pub fn get(&self, index: I) -> Option<&V> {
         let index = self.sparse.get(index)?;
         Some(&self.values[*index])
@@ -345,8 +347,8 @@ impl<I: SparseIndex, V> ImmutableSparseSet<I, V> {
     }
 }
 
-impl<I, V> From<SparseSet<I, V>> for ImmutableSparseSet<I, V> {
-    fn from(set: SparseSet<I, V>) -> Self {
+impl<V, I> From<SparseSet<V, I>> for ImmutableSparseSet<V, I> {
+    fn from(set: SparseSet<V, I>) -> Self {
         let values = set.values.into_boxed_slice();
         let indices = set.indices.into_boxed_slice();
         let sparse = ImmutableSparseArray::from(set.sparse);
@@ -356,5 +358,51 @@ impl<I, V> From<SparseSet<I, V>> for ImmutableSparseSet<I, V> {
             indices,
             sparse,
         }
+    }
+}
+
+#[allow(unused_imports)]
+mod tests {
+    use super::{SparseArray, SparseSet};
+
+    #[test]
+    fn sparse_array_insert() {
+        let mut array = SparseArray::<u32>::new();
+        array.push(10);
+        array.insert(0, 20);
+
+        let value = array[0];
+        assert_eq!(value, Some(20));
+    }
+
+    #[test]
+    fn sparse_array_remove() {
+        let mut array = SparseArray::<u32>::new();
+        array.push(10);
+
+        let value = array.remove(0);
+        assert_eq!(value, Some(10));
+    }
+
+    #[test]
+    fn sparse_set_insert() {
+        let mut set = SparseSet::<u32>::new();
+        set.insert(0, 10);
+        set.insert(1, 20);
+        set.insert(10, 30);
+
+        assert_eq!(set.get(0), Some(&10));
+        assert_eq!(set.get(1), Some(&20));
+        assert_eq!(set.get(10), Some(&30));
+    }
+
+    #[test]
+    fn sparse_set_remove() {
+        let mut set = SparseSet::<u32>::new();
+        set.insert(0, 10);
+        set.insert(1, 20);
+        set.insert(10, 30);
+
+        assert_eq!(set.remove(1), Some(20));
     }
 }
