@@ -383,3 +383,59 @@ impl Table {
         self.columns.contains(id)
     }
 }
+
+#[allow(unused_imports)]
+mod tests {
+    use super::{Row, Table, TableBuilder};
+    use crate::{
+        core::TypeMeta,
+        world::{Component, ComponentId, Entity},
+    };
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct Age(u32);
+    impl Component for Age {}
+
+    #[test]
+    fn build_table() {
+        let id = ComponentId(0);
+
+        let table = TableBuilder::new().with_column::<Age>(id).build();
+        let column = table.get_column(id).unwrap();
+
+        let meta = TypeMeta::new::<Age>();
+
+        assert_eq!(meta, *column.data.meta());
+    }
+
+    #[test]
+    fn table_add_entity() {
+        let id = ComponentId(0);
+
+        let entity = Entity::root(0);
+        let mut row = Row::new();
+        row.insert(id, Age(0));
+
+        let mut table = TableBuilder::new().with_column::<Age>(id).build();
+        table.add_entity(entity, row);
+
+        let age = table.get_component::<Age>(entity, id);
+        assert_eq!(age, Some(&Age(0)));
+    }
+
+    #[test]
+    fn table_remove_entity() {
+        let id = ComponentId(0);
+
+        let entity = Entity::root(0);
+        let mut row = Row::new();
+        row.insert(id, Age(0));
+
+        let mut table = TableBuilder::new().with_column::<Age>(id).build();
+        table.add_entity(entity, row);
+
+        let row = table.remove_entity(entity).unwrap();
+        let age = row.get::<Age>(id);
+        assert_eq!(age, Some(&Age(0)));
+    }
+}

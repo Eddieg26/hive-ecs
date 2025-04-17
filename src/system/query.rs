@@ -679,7 +679,8 @@ mod tests {
 
     use super::*;
 
-    impl Component for i32 {}
+    struct Age(u32);
+    impl Component for Age {}
 
     #[test]
     fn test_modified_filter() {
@@ -687,17 +688,17 @@ mod tests {
         let mut archetype_query = ArchetypeQuery::default();
 
         // Register a component
-        let component_id = components.register::<i32>();
+        let component_id = components.register::<Age>();
 
         // Initialize the Modified filter
-        let modified_filter = Modified::<i32>::init(&components, &mut archetype_query);
+        let modified_filter = Modified::<Age>::init(&components, &mut archetype_query);
 
         let system_frame = Frame(0);
         let current_frame = Frame(1);
 
         // Create a mock archetype with a table for the component
         let mut row = Row::new();
-        row.insert_cell(component_id, TableCell::with_frame(10, current_frame));
+        row.insert_cell(component_id, TableCell::with_frame(Age(10), current_frame));
         let archetype = Archetype::new(
             ArchetypeId(0),
             row.into_table(Entity::root(0)),
@@ -706,8 +707,8 @@ mod tests {
 
         // Check if the filter detects the modification
         let mut state =
-            Modified::<i32>::state(&modified_filter, &archetype, current_frame, system_frame);
+            Modified::<Age>::state(&modified_filter, &archetype, current_frame, system_frame);
         let row = RowIndex(0);
-        assert!(Modified::<i32>::get(&mut state, Entity::root(0), row));
+        assert!(Modified::<Age>::get(&mut state, Entity::root(0), row));
     }
 }

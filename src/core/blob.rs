@@ -4,7 +4,7 @@ use std::{
     ptr::{self},
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TypeMeta {
     pub name: &'static str,
     pub layout: Layout,
